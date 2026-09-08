@@ -163,7 +163,7 @@ async function resolveImportCustomColumns(
 // /api/openapi.json + GET /llms.txt from the live routes). App code below is
 // just routes + business logic.
 const app = createApp<Env>({
-  title: "CRM App",
+  title: "OpenCRM",
   version: "1.0.0",
   description: "A CRM with companies, contacts, and deal pipeline management.",
 });

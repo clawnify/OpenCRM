@@ -1,4 +1,4 @@
-# CRM App — agent guide
+# OpenCRM — agent guide
 
 A CRM with **companies**, **contacts**, and a **deals** pipeline, plus an activity
 timeline and Clawnify integrations. Preact + Hono + D1.

@@ -1,5 +1,5 @@
 {
-  "name": "CRM App",
+  "name": "OpenCRM",
   "description": "CRM with companies, contacts, and deals pipeline. Like HubSpot. Best for customer relationship management, sales tracking, contact databases, or deal pipelines.",
   "framework": "react+hono",
   "files": [

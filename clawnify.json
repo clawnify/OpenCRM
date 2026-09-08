@@ -1,7 +1,7 @@
 {
   "$schema": "https://app.clawnify.com/schema/v1/clawnify.json",
   "version": 1,
-  "name": "CRM App",
+  "name": "OpenCRM",
   "description": "CRM with companies, contacts, and deals pipeline. Like HubSpot. Best for customer relationship management, sales tracking, contact databases, or deal pipelines.",
   "icon": "icon.svg",
   "tags": ["crm", "sales", "contacts", "pipeline"],
