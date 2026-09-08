@@ -5,7 +5,9 @@
 
 /* Category color utilities (owners, company tags, deal stages) are composed at
    runtime, so keep them in @source or Tailwind won't emit them. */
-@source inline("{bg,text,ring,border}-{sky,rose,amber,emerald,violet,fuchsia,teal,orange,slate}-{50,100,200,300,400,500,600,700,800,900}");
+@source inline("{bg,text,ring,border}-cat-{0,1,2,3,4,5,6,7,8,9,neutral}-{tint,text,solid}");
+@source inline("{bg,text,ring,border}-{success,warning,destructive,info}-{tint,solid}");
+@source inline("text-{success,warning,destructive,info}");
 
 @theme inline {
   --color-background: var(--background);
@@ -36,77 +38,183 @@
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
+  /* Category families: generated (DESIGN.md → Colors), same L/C% per role, hue per stop. */
+  --color-cat-0-tint: var(--cat-0-tint);
+  --color-cat-0-text: var(--cat-0-text);
+  --color-cat-0-solid: var(--cat-0-solid);
+  --color-cat-1-tint: var(--cat-1-tint);
+  --color-cat-1-text: var(--cat-1-text);
+  --color-cat-1-solid: var(--cat-1-solid);
+  --color-cat-2-tint: var(--cat-2-tint);
+  --color-cat-2-text: var(--cat-2-text);
+  --color-cat-2-solid: var(--cat-2-solid);
+  --color-cat-3-tint: var(--cat-3-tint);
+  --color-cat-3-text: var(--cat-3-text);
+  --color-cat-3-solid: var(--cat-3-solid);
+  --color-cat-4-tint: var(--cat-4-tint);
+  --color-cat-4-text: var(--cat-4-text);
+  --color-cat-4-solid: var(--cat-4-solid);
+  --color-cat-5-tint: var(--cat-5-tint);
+  --color-cat-5-text: var(--cat-5-text);
+  --color-cat-5-solid: var(--cat-5-solid);
+  --color-cat-6-tint: var(--cat-6-tint);
+  --color-cat-6-text: var(--cat-6-text);
+  --color-cat-6-solid: var(--cat-6-solid);
+  --color-cat-7-tint: var(--cat-7-tint);
+  --color-cat-7-text: var(--cat-7-text);
+  --color-cat-7-solid: var(--cat-7-solid);
+  --color-cat-8-tint: var(--cat-8-tint);
+  --color-cat-8-text: var(--cat-8-text);
+  --color-cat-8-solid: var(--cat-8-solid);
+  --color-cat-9-tint: var(--cat-9-tint);
+  --color-cat-9-text: var(--cat-9-text);
+  --color-cat-9-solid: var(--cat-9-solid);
+  --color-cat-neutral-tint: var(--cat-neutral-tint);
+  --color-cat-neutral-text: var(--cat-neutral-text);
+  --color-cat-neutral-solid: var(--cat-neutral-solid);
 
-  /* DESIGN-APPS radii — explicit four-step scale (atoms 4px, containers 8px,
-     modals 12px). NOT shadcn's stock single --radius. */
-  --radius-sm: 0.25rem;
-  --radius-md: 0.375rem;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.75rem;
+  /* DESIGN.md radii: inputs 8px, tiles 12px, cards 16px, hero/modal 24px. */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;   /* cards */
+  --radius-lg: 1rem;      /* modals */
+  --radius-xl: 1.5rem;
+  --shadow-edge: var(--edge-rest);
+  --shadow-raised: var(--edge-raised);
+  --shadow-float: var(--edge-float);
+  --shadow-solid: var(--shadow-solid);
+  --shadow-popover: var(--popover-shadow);
+  --color-accent-brand: var(--accent-brand);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-text: var(--accent-text);
+  --color-destructive-tint: var(--destructive-tint);
+  --color-destructive-solid: var(--destructive-solid);
+  --color-info-solid: var(--info-solid);
+  --color-success-solid: var(--success-solid);
+  --color-success-tint: var(--success-foreground);
+  --color-warning-tint: var(--warning-foreground);
+  --color-warning-solid: var(--warning-solid);
+  --color-faint: var(--faint);
+  --color-info: var(--info);
+  --color-info-tint: var(--info-tint);
 }
 
-/* ── Light (DESIGN-APPS default) — coral primary, white canvas ─────────── */
+/* ── Light (DESIGN.md default): warm canvas, ink action, coral accent ─── */
 :root {
-  --background: #ffffff;
-  --foreground: #1a202c;
-  --card: #ffffff;
-  --card-foreground: #1a202c;
-  --popover: #ffffff;
-  --popover-foreground: #1a202c;
-  --primary: #dd5164;             /* Clawnify coral — the one CTA per screen */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.22 0.002 85);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.002 85);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.002 85);
+  --primary: oklch(0.22 0.002 85);             /* the one action per screen: an ink pill */
   --primary-foreground: #ffffff;
-  --secondary: #f1f5f9;           /* surface-sunken */
-  --secondary-foreground: #1a202c;
-  --muted: #f1f5f9;
-  --muted-foreground: #475569;    /* AA even on surface-sunken */
-  --accent: #f1f5f9;
-  --accent-foreground: #1a202c;
-  --destructive: #b91c1c;
+  --secondary: oklch(0.975 0.002 85);           /* surface-sunken: the filled secondary button */
+  --secondary-foreground: oklch(0.22 0.002 85);
+  --muted: oklch(0.975 0.002 85);
+  --muted-foreground: oklch(0.5 0.005 85);    /* AA on surface-sunken */
+  --faint: oklch(0.68 0.007 85);
+  --accent: oklch(0.975 0.002 85);              /* shadcn's hover tone */
+  --accent-foreground: oklch(0.22 0.002 85);
+  --accent-brand: oklch(0.6 0.204 15.7056);        /* the app's hue: icon, active nav, hero, focus */
+  --accent-tint: oklch(0.955 0.013 15.7056);
+  --destructive: oklch(0.44 0.125 25);
   --destructive-foreground: #ffffff;
-  --success: #047857;
-  --success-foreground: #ecfdf5;
-  --warning: #b45309;
-  --warning-foreground: #fffbeb;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #2563eb;                /* the only blue in the chrome — focus + links */
-  --sidebar: #ffffff;
-  --sidebar-foreground: #1a202c;
-  --sidebar-accent: color-mix(in srgb, var(--primary) 12%, transparent);
-  --sidebar-accent-foreground: #dd5164;
-  --sidebar-border: #e2e8f0;
+  --info: oklch(0.44 0.211 265);
+  --info-tint: oklch(0.955 0.013 265);
+  --success: oklch(0.44 0.081 152);
+  --success-foreground: oklch(0.955 0.044 152);
+  --warning: oklch(0.44 0.064 78);
+  --warning-foreground: oklch(0.955 0.023 78);
+  --border: oklch(0.915 0.007 85);
+  --input: oklch(1 0 0);               /* filled inputs, no outline */
+  --ring: oklch(0.6 0.204 15.7056);
+  --sidebar: oklch(0.975 0.002 85);
+  --sidebar-foreground: oklch(0.22 0.002 85);
+  --sidebar-accent: oklch(0.955 0.013 15.7056);
+  --sidebar-accent-foreground: oklch(0.44 0.123 15.7056);
+  --sidebar-border: oklch(0.915 0.007 85);
+  --popover-shadow: 0 8px 24px rgba(20, 20, 20, 0.12);
+  --accent-text: oklch(0.44 0.123 15.7056);
+  --destructive-tint: oklch(0.955 0.013 25);
+  --destructive-solid: oklch(0.6 0.207 25);
+  --info-solid: oklch(0.6 0.184 265);
+  --success-solid: oklch(0.6 0.134 152);
+  --warning-solid: oklch(0.6 0.106 78);
+  --cat-0-tint: oklch(0.955 0.013 265); --cat-0-text: oklch(0.44 0.211 265); --cat-0-solid: oklch(0.6 0.184 265);
+  --cat-1-tint: oklch(0.955 0.015 301); --cat-1-text: oklch(0.44 0.164 301); --cat-1-solid: oklch(0.6 0.222 301);
+  --cat-2-tint: oklch(0.955 0.019 337); --cat-2-text: oklch(0.44 0.136 337); --cat-2-solid: oklch(0.6 0.225 337);
+  --cat-3-tint: oklch(0.955 0.014 13); --cat-3-text: oklch(0.44 0.123 13); --cat-3-solid: oklch(0.6 0.204 13);
+  --cat-4-tint: oklch(0.955 0.015 49); --cat-4-text: oklch(0.44 0.083 49); --cat-4-solid: oklch(0.6 0.137 49);
+  --cat-5-tint: oklch(0.955 0.029 85); --cat-5-text: oklch(0.44 0.063 85); --cat-5-solid: oklch(0.6 0.105 85);
+  --cat-6-tint: oklch(0.955 0.086 121); --cat-6-text: oklch(0.44 0.074 121); --cat-6-solid: oklch(0.6 0.122 121);
+  --cat-7-tint: oklch(0.955 0.042 157); --cat-7-text: oklch(0.44 0.073 157); --cat-7-solid: oklch(0.6 0.121 157);
+  --cat-8-tint: oklch(0.955 0.040 193); --cat-8-text: oklch(0.44 0.053 193); --cat-8-solid: oklch(0.6 0.087 193);
+  --cat-9-tint: oklch(0.955 0.016 229); --cat-9-text: oklch(0.44 0.061 229); --cat-9-solid: oklch(0.6 0.101 229);
+  --cat-neutral-tint: oklch(0.935 0.008 85); --cat-neutral-text: oklch(0.5 0.005 85); --cat-neutral-solid: oklch(0.68 0.007 85);
+  --edge-rest: inset 0 0 0 1px oklch(0.915 0.007 85);
+  --edge-raised: 0 0 2px rgba(28, 40, 64, 0.18), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --edge-float: 0 0 0 1px rgba(28, 40, 64, 0.04), 0 4px 8px -4px rgba(28, 40, 64, 0.12), 0 4px 12px -2px rgba(24, 41, 75, 0.16);
+  --shadow-solid: inset 0 0 0 1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(20, 20, 20, 0.12);
 }
 
-/* ── Dark (GitHub-dim) — coral holds, no inversion ────────────────────── */
+/* ── Dark: tonal ladder carries the hierarchy, shadows off ─────────────── */
 .dark {
-  --background: #0d1117;
-  --foreground: #e6edf3;
-  --card: #161b22;
-  --card-foreground: #e6edf3;
-  --popover: #161b22;
-  --popover-foreground: #e6edf3;
-  --primary: #dd5164;
-  --primary-foreground: #ffffff;
-  --secondary: #1c2128;
-  --secondary-foreground: #e6edf3;
-  --muted: #1c2128;
-  --muted-foreground: #9ba7b3;
-  --accent: #1c2128;
-  --accent-foreground: #e6edf3;
-  --destructive: #f85149;
-  --destructive-foreground: #0d1117;
-  --success: #3fb950;
-  --success-foreground: #12261e;
-  --warning: #d29922;
-  --warning-foreground: #2a2210;
-  --border: #30363d;
-  --input: #30363d;
-  --ring: #4493f8;
-  --sidebar: #0d1117;
-  --sidebar-foreground: #e6edf3;
-  --sidebar-accent: color-mix(in srgb, var(--primary) 18%, transparent);
-  --sidebar-accent-foreground: #f0a0aa;
-  --sidebar-border: #30363d;
+  --background: oklch(0.17 0.002 85);
+  --foreground: oklch(0.95 0.002 85);
+  --card: oklch(0.2 0.002 85);
+  --card-foreground: oklch(0.95 0.002 85);
+  --popover: oklch(0.2 0.002 85);
+  --popover-foreground: oklch(0.95 0.002 85);
+  --primary: oklch(0.95 0.002 85);
+  --primary-foreground: oklch(0.17 0.002 85);
+  --secondary: oklch(0.25 0.003 85);
+  --secondary-foreground: oklch(0.95 0.002 85);
+  --muted: oklch(0.25 0.003 85);
+  --muted-foreground: oklch(0.8 0.007 85);
+  --faint: oklch(0.6 0.006 85);
+  --accent: oklch(0.25 0.003 85);
+  --accent-foreground: oklch(0.95 0.002 85);
+  --accent-brand: oklch(0.62 0.198 15.7056);
+  --accent-tint: oklch(0.27 0.049 15.7056);
+  --destructive: oklch(0.82 0.055 25);
+  --destructive-foreground: #ffffff;
+  --info: oklch(0.82 0.049 265);
+  --info-tint: oklch(0.27 0.083 265);
+  --success: oklch(0.82 0.119 152);
+  --success-foreground: oklch(0.27 0.032 152);
+  --warning: oklch(0.82 0.093 78);
+  --warning-foreground: oklch(0.27 0.025 78);
+  --border: oklch(0.3 0.003 85);
+  --input: oklch(0.2 0.002 85);
+  --ring: oklch(0.62 0.198 15.7056);
+  --sidebar: oklch(0.25 0.003 85);
+  --sidebar-foreground: oklch(0.95 0.002 85);
+  --sidebar-accent: oklch(0.27 0.049 15.7056);
+  --sidebar-accent-foreground: oklch(0.82 0.056 15.7056);
+  --sidebar-border: oklch(0.3 0.003 85);
+  --popover-shadow: none;
+  --accent-text: oklch(0.82 0.056 15.7056);
+  --destructive-tint: oklch(0.27 0.049 25);
+  --destructive-solid: oklch(0.62 0.201 25);
+  --info-solid: oklch(0.62 0.163 265);
+  --success-solid: oklch(0.62 0.130 152);
+  --warning-solid: oklch(0.62 0.103 78);
+  --cat-0-tint: oklch(0.27 0.083 265); --cat-0-text: oklch(0.82 0.049 265); --cat-0-solid: oklch(0.62 0.163 265);
+  --cat-1-tint: oklch(0.27 0.065 301); --cat-1-text: oklch(0.82 0.059 301); --cat-1-solid: oklch(0.62 0.197 301);
+  --cat-2-tint: oklch(0.27 0.054 337); --cat-2-text: oklch(0.82 0.079 337); --cat-2-solid: oklch(0.62 0.218 337);
+  --cat-3-tint: oklch(0.27 0.049 13); --cat-3-text: oklch(0.82 0.056 13); --cat-3-solid: oklch(0.62 0.198 13);
+  --cat-4-tint: oklch(0.27 0.033 49); --cat-4-text: oklch(0.82 0.061 49); --cat-4-solid: oklch(0.62 0.133 49);
+  --cat-5-tint: oklch(0.27 0.025 85); --cat-5-text: oklch(0.82 0.092 85); --cat-5-solid: oklch(0.62 0.102 85);
+  --cat-6-tint: oklch(0.27 0.029 121); --cat-6-text: oklch(0.82 0.108 121); --cat-6-solid: oklch(0.62 0.119 121);
+  --cat-7-tint: oklch(0.27 0.029 157); --cat-7-text: oklch(0.82 0.107 157); --cat-7-solid: oklch(0.62 0.118 157);
+  --cat-8-tint: oklch(0.27 0.021 193); --cat-8-text: oklch(0.82 0.077 193); --cat-8-solid: oklch(0.62 0.085 193);
+  --cat-9-tint: oklch(0.27 0.024 229); --cat-9-text: oklch(0.82 0.063 229); --cat-9-solid: oklch(0.62 0.098 229);
+  --cat-neutral-tint: oklch(0.29 0.005 85); --cat-neutral-text: oklch(0.8 0.007 85); --cat-neutral-solid: oklch(0.6 0.006 85);
+  --edge-rest: inset 0 0 0 1px oklch(0.3 0.003 85);
+  --edge-raised: inset 0 0 0 1px oklch(0.3 0.003 85);
+  --edge-float: inset 0 0 0 1px oklch(0.3 0.003 85);
+  --shadow-solid: none;
 }
 
 @layer base {
@@ -115,6 +223,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: 0.9375rem;
     font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
@@ -122,15 +231,23 @@
   .tabular { font-variant-numeric: tabular-nums; }
 }
 
-/* The 11px uppercase tracked zone label — DESIGN-APPS signature #1. */
-.eyebrow {
+/* Sentence-case group / section label (DESIGN.md `label`). The uppercase
+   `micro` style is reserved for the label above a KPI number (.stat-label). */
+.section-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--muted-foreground);
+}
+.stat-label {
   font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted-foreground);
 }
+.card-title { font-size: 1.0625rem; font-weight: 600; line-height: 1.3; }
 
 /* Agent/touch mode: larger interactive targets (set data-agent on <html>). */
 [data-agent] button,

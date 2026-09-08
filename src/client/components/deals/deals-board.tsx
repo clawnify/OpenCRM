@@ -57,7 +57,7 @@ export function DealsBoard() {
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader title="Deals" count={stats.deals}>
         <div className="flex flex-col items-end">
-          <div className="eyebrow">Pipeline value</div>
+          <div className="section-label">Pipeline value</div>
           <span className="tabular text-sm font-semibold">{formatMoney(dealsTotalValue)}</span>
         </div>
         {addButton}

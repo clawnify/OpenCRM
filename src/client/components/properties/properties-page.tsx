@@ -138,10 +138,15 @@ function EntityAttributes({
   // Optimistic row order (def ids) while a drag's position writes are in
   // flight; null = trust the server order (defs arrive sorted by position).
   const [localOrder, setLocalOrder] = useState<string[] | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CustomFieldDef | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  const remove = async (def: CustomFieldDef) => {
-    if (!confirm(`Delete "${def.label}"? This removes the column and its values for every ${entity}.`)) return;
+  // A destructive action confirms in a dialog that names the object, never window.confirm.
+  const remove = (def: CustomFieldDef) => setDeleteTarget(def);
+  const confirmRemove = async () => {
+    const def = deleteTarget;
+    if (!def) return;
+    setDeleteTarget(null);
     try {
       await deleteCustomField(def.id);
       await onChanged();
@@ -189,7 +194,7 @@ function EntityAttributes({
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search attributes" className="pl-8" />
       </div>
 
-      <div className="overflow-hidden rounded-md border border-border">
+      <div className="overflow-hidden rounded-md shadow-edge">
         <DndContext sensors={sensors} collisionDetection={closestCenter}
           modifiers={[restrictToVerticalAxis, restrictToParentElement]} onDragEnd={onDragEnd}>
           <Table>
@@ -240,6 +245,21 @@ function EntityAttributes({
       <AddAttribute entity={entity} existingKeys={defs.map((d) => d.key)} onChanged={onChanged} onError={onError} />
 
       <EditAttribute def={editing} onClose={() => setEditing(null)} onChanged={onChanged} onError={onError} />
+
+      {deleteTarget && (
+        <Dialog open onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Delete "{deleteTarget.label}"?</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">This removes the column and its values for every {entity}. It cannot be undone.</p>
+            <DialogFooter>
+              <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
+              <Button variant="destructive" onClick={confirmRemove}>Delete attribute</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -374,7 +394,7 @@ function EditAttribute({
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="edit-enum">Values (one per line)</Label>
               <textarea id="edit-enum" value={enumText} onChange={(e) => setEnumText(e.target.value)}
-                className="min-h-[80px] rounded-md border border-input bg-transparent px-2 py-1.5 font-mono text-sm" />
+                className="min-h-[80px] rounded-sm bg-card px-2 py-1.5 font-mono text-sm shadow-edge" />
             </div>
           )}
           {isScore && (
@@ -463,8 +483,8 @@ function AddAttribute({
   };
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-md border border-border p-4">
-      <div className="eyebrow">New attribute</div>
+    <form onSubmit={submit} className="space-y-3 rounded-md p-4 shadow-edge">
+      <div className="section-label">New attribute</div>
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="prop-label">Label</Label>
@@ -491,7 +511,7 @@ function AddAttribute({
           <Label htmlFor="prop-enum">Values (one per line)</Label>
           <textarea id="prop-enum" value={enumText} onChange={(e) => setEnumText(e.target.value)}
             placeholder={"Immediate\nStrong\nMonitor"}
-            className="min-h-[80px] rounded-md border border-input bg-transparent px-2 py-1.5 font-mono text-sm" />
+            className="min-h-[80px] rounded-sm bg-card px-2 py-1.5 font-mono text-sm shadow-edge" />
         </div>
       )}
       {isScore && (

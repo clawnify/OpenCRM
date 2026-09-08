@@ -1826,6 +1826,22 @@ app.get("/api/contacts/:id", async (c) => {
   }
 });
 
+app.get("/api/companies/:id", async (c) => {
+  try {
+    const id = c.req.param("id");
+    if (!id) return c.json({ error: "Not found" }, 404);
+    const company = await get(
+      `SELECT c.*, (SELECT COUNT(*) FROM contacts WHERE company_id = c.id) as contact_count
+       FROM companies c WHERE c.id = ?`,
+      [id],
+    );
+    if (!company) return c.json({ error: "Company not found" }, 404);
+    return c.json({ company }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 // ── Custom properties (field definitions + schema-sync) ────────────
 
 app.get("/api/custom-fields", async (c) => {

@@ -109,7 +109,7 @@ export function CompanyDialog({
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <div className="eyebrow">Company</div>
+          <div className="section-label">Company</div>
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="name">Name</Label>

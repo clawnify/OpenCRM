@@ -114,7 +114,7 @@ export function StageDialog({
                   type="button"
                   onClick={() => setOutcome(o.v)}
                   className={cn(
-                    "rounded-md border px-2.5 py-1.5 text-sm transition-colors",
+                    "rounded-sm px-2.5 py-1.5 text-sm shadow-edge transition-colors",
                     outcome === o.v
                       ? "border-foreground bg-secondary font-medium"
                       : "border-border text-muted-foreground hover:bg-secondary",

@@ -285,7 +285,7 @@ export function ImportDialog({
             </div>
 
             {canInfer && (
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-input p-3 text-sm">
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-md p-3 text-sm shadow-edge">
                 <input
                   type="checkbox"
                   className="mt-0.5 size-4 shrink-0 accent-primary"
@@ -321,7 +321,7 @@ export function ImportDialog({
 
         {step === "done" && result && (
           <div className="flex flex-col items-center gap-3 py-6 text-center">
-            <CheckCircle2 className="size-10 text-emerald-600" />
+            <CheckCircle2 className="size-10 text-success" />
             <p className="font-semibold">
               {result.imported} {result.imported === 1 ? config.noun : `${config.noun}s`} imported
             </p>

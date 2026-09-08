@@ -16,6 +16,7 @@ export interface CrmContextValue {
   updateContact: (id: string, data: Partial<Contact>) => Promise<void>;
   deleteContact: (id: string) => Promise<void>;
   fetchContact: (id: string) => Promise<Contact | null>;
+  fetchCompany: (id: string) => Promise<Company | null>;
 
   // Companies
   companies: Company[];

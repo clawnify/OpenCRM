@@ -4,7 +4,6 @@ import { useCrm } from "@/context";
 import { PageHeader, Avatar, EntityIcon, CategoryBadge, EmptyState } from "@/components/shared";
 import { ConnectionsIndicator } from "@/components/connections-indicator";
 import { ContactDialog } from "@/components/contacts/contact-dialog";
-import { ContactPreview } from "@/components/contacts/contact-preview";
 import { TableFilter, fieldsFromDefs } from "@/components/table-filter";
 import { ImportDialog } from "@/components/import-dialog";
 import { contactImportConfig } from "@/lib/import-config";
@@ -34,8 +33,6 @@ export function ContactsPage({ navigate }: { navigate: (to: string) => void }) {
   const [search, setSearch] = useState(contactsPag.search);
   const [importOpen, setImportOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<Contact | undefined>(undefined);
-  const [preview, setPreview] = useState<Contact | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -46,11 +43,6 @@ export function ContactsPage({ navigate }: { navigate: (to: string) => void }) {
   }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openCreate = () => {
-    setEditing(undefined);
-    setDialogOpen(true);
-  };
-  const openEdit = (c: Contact) => {
-    setEditing(c);
     setDialogOpen(true);
   };
 
@@ -85,7 +77,7 @@ export function ContactsPage({ navigate }: { navigate: (to: string) => void }) {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search contacts…"
             aria-label="Search contacts"
-            className="h-9 w-56 pl-8"
+            className="h-7 w-56 pl-8"
           />
         </div>
         <TableFilter fields={filterFields} filters={contactsPag.filters} onChange={setContactsFilters} />
@@ -133,10 +125,10 @@ export function ContactsPage({ navigate }: { navigate: (to: string) => void }) {
                 {contacts.map((c) => {
                   const fullName = `${c.first_name} ${c.last_name}`.trim();
                   return (
-                    <TableRow key={c.id} className="cursor-pointer hover:bg-secondary" onClick={() => setPreview(c)}>
+                    <TableRow key={c.id} className="cursor-pointer hover:bg-secondary" onClick={() => navigate(`/contacts/${c.id}`)}>
                       <TableCell>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setPreview(c); }}
+                          onClick={(e) => { e.stopPropagation(); navigate(`/contacts/${c.id}`); }}
                           aria-label={`View ${fullName || "contact"}`}
                           className="flex min-w-0 items-center gap-2.5 text-left font-medium hover:underline"
                         >
@@ -146,7 +138,7 @@ export function ContactsPage({ navigate }: { navigate: (to: string) => void }) {
                       </TableCell>
                       <TableCell>
                         {c.email ? (
-                          <a href={`mailto:${c.email}`} onClick={(e) => e.stopPropagation()} className="text-[var(--ring)] hover:underline">
+                          <a href={`mailto:${c.email}`} onClick={(e) => e.stopPropagation()} className="text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground">
                             {c.email}
                           </a>
                         ) : (
@@ -184,7 +176,7 @@ export function ContactsPage({ navigate }: { navigate: (to: string) => void }) {
                             variant="ghost"
                             className="size-8"
                             aria-label={`Edit ${fullName || "contact"}`}
-                            onClick={() => openEdit(c)}
+                            onClick={() => navigate(`/contacts/${c.id}`)}
                           >
                             <Pencil className="size-4" />
                           </Button>
@@ -234,13 +226,8 @@ export function ContactsPage({ navigate }: { navigate: (to: string) => void }) {
         </div>
       )}
 
-      <ContactDialog open={dialogOpen} onOpenChange={setDialogOpen} contact={editing} />
+      <ContactDialog open={dialogOpen} onOpenChange={setDialogOpen} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} config={contactImportConfig} />
-      <ContactPreview
-        contact={preview}
-        onClose={() => setPreview(null)}
-        onEdit={(c) => { setPreview(null); openEdit(c); }}
-      />
 
       <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent className="max-w-sm">
@@ -285,7 +272,7 @@ function SortHeader({
       <button
         onClick={() => onSort(col)}
         aria-label={`Sort by ${col}`}
-        className={cn("inline-flex items-center gap-1 uppercase tracking-wider hover:text-foreground", active && "text-foreground")}
+        className={cn("inline-flex items-center gap-1 hover:text-foreground", active && "text-foreground")}
       >
         {children}
         {active && (pag.order === "asc" ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />)}

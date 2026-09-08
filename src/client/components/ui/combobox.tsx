@@ -90,14 +90,14 @@ export function Combobox({
         type="button"
         id={id}
         onClick={() => setOpen((o) => !o)}
-        className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+        className="flex h-9 w-full items-center justify-between gap-2 rounded-sm bg-card shadow-edge px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
       >
         <span className={cn("truncate", !selected && "text-muted-foreground")}>{selected?.label ?? placeholder}</span>
         <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-md border border-border bg-background shadow-lg">
+        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-md bg-popover shadow-float">
           <div className="flex items-center gap-2 border-b border-border px-2.5">
             <Search className="size-4 shrink-0 text-muted-foreground" />
             <input

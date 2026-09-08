@@ -29,7 +29,7 @@ TableRow.displayName = "TableRow";
 
 const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<HTMLTableCellElement>>(
   ({ className, ...props }, ref) => (
-    <th ref={ref} className={cn("h-10 whitespace-nowrap px-3 text-left align-middle text-xs font-semibold uppercase tracking-wider text-muted-foreground", className)} {...props} />
+    <th ref={ref} className={cn("h-11 whitespace-nowrap px-3 text-left align-middle text-[0.8125rem] font-medium text-muted-foreground", className)} {...props} />
   ),
 );
 TableHead.displayName = "TableHead";
@@ -39,7 +39,7 @@ TableHead.displayName = "TableHead";
 // when a cell holds a long summary or many tags. Override `max-w-*` per cell
 // when a column needs to be wider/narrower.
 const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => <td ref={ref} className={cn("max-w-[16rem] truncate px-3 py-2 align-middle", className)} {...props} />,
+  ({ className, ...props }, ref) => <td ref={ref} className={cn("h-11 max-w-[16rem] truncate px-3 py-2 align-middle", className)} {...props} />,
 );
 TableCell.displayName = "TableCell";
 

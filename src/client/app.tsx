@@ -7,6 +7,7 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { ContactsPage } from "./components/contacts/contacts-page";
 import { ContactDetail } from "./components/contacts/contact-detail";
 import { CompaniesPage } from "./components/companies/companies-page";
+import { CompanyDetail } from "./components/companies/company-detail";
 import { DealsBoard } from "./components/deals/deals-board";
 import { PropertiesPage } from "./components/properties/properties-page";
 
@@ -27,7 +28,8 @@ export function App() {
             <>
               {route.name === "contacts" && <ContactsPage navigate={navigate} />}
               {route.name === "contact" && <ContactDetail id={route.id} navigate={navigate} />}
-              {route.name === "companies" && <CompaniesPage />}
+              {route.name === "companies" && <CompaniesPage navigate={navigate} />}
+              {route.name === "company" && <CompanyDetail id={route.id} navigate={navigate} />}
               {route.name === "deals" && <DealsBoard />}
               {route.name === "properties" && <PropertiesPage />}
               {route.name === "not-found" && (
