@@ -164,6 +164,15 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     await Promise.all([fetchCompanies(companiesPag), fetchStats()]);
   }, [companiesPag, fetchCompanies, fetchStats]);
 
+  const fetchCompany = useCallback(async (id: string): Promise<Company | null> => {
+    try {
+      const data = await api<{ company: Company }>("GET", `/api/companies/${id}`);
+      return data.company;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const updateCompany = useCallback(async (id: string, data: Partial<Company>) => {
     await api("PUT", `/api/companies/${id}`, data);
     await fetchCompanies(companiesPag);
@@ -235,7 +244,7 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
   return {
     isAgent, stats,
     contacts, contactsPag, setContactsPage: cSet.setPage, setContactsSort: cSet.setSort, setContactsSearch: cSet.setSearch, setContactsFilters: cSet.setFilters,
-    addContact, updateContact, deleteContact, fetchContact,
+    addContact, updateContact, deleteContact, fetchContact, fetchCompany,
     companies, companiesPag, setCompaniesPage: coSet.setPage, setCompaniesSort: coSet.setSort, setCompaniesSearch: coSet.setSearch, setCompaniesFilters: coSet.setFilters,
     addCompany, updateCompany, deleteCompany,
     deals, dealsPag, dealsTotalValue, setDealsPage: dSet.setPage, setDealsSort: dSet.setSort, setDealsSearch: dSet.setSearch,

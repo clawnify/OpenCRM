@@ -65,10 +65,11 @@ function enumValues(def: CustomFieldDef): string[] {
 // ── Badge colors (semantic → token, else stable hash) ─────────────────
 
 const SEMANTIC: Record<string, ColorToken> = {
-  high: "emerald", won: "emerald", verified: "emerald", active: "emerald", live: "emerald", qualified: "emerald", hot: "emerald", approved: "emerald",
-  medium: "amber", warm: "amber", strong: "amber", inferred: "amber", negotiating: "amber", pending: "amber",
-  immediate: "rose", urgent: "rose", lost: "rose", rejected: "rose", critical: "rose", churned: "rose",
-  low: "slate", monitor: "slate", general: "slate", cold: "slate", inactive: "slate", new: "slate",
+  high: "success", won: "success", verified: "success", active: "success", live: "success", qualified: "success", hot: "success", approved: "success",
+  medium: "warning", warm: "warning", strong: "warning", inferred: "warning", negotiating: "warning", pending: "warning",
+  immediate: "danger", urgent: "danger", lost: "danger", rejected: "danger", critical: "danger", churned: "danger",
+  lead: "info", new: "info", open: "info", scheduled: "info", in_progress: "info", contacted: "info",
+  low: "slate", monitor: "slate", general: "slate", cold: "slate", inactive: "slate",
 };
 
 function badgeToken(value: string): ColorToken {
@@ -81,7 +82,7 @@ function Pill({ value }: { value: string }) {
   return (
     <span
       title={value}
-      className={cn("inline-block max-w-[10rem] truncate rounded-full border px-2 py-0.5 align-middle text-xs font-medium", c.bg, c.text, c.border)}
+      className={cn("inline-block max-w-[10rem] truncate rounded-full px-2.5 py-1 align-middle text-xs font-medium", c.bg, c.text)}
     >
       {value}
     </span>
@@ -116,7 +117,7 @@ export function CustomFieldDisplay({ def, value, full = false }: { def: CustomFi
     const max = Number(def.options.max ?? 100);
     const n = Number(value);
     const pct = Math.max(0, Math.min(1, (n - min) / (max - min || 1)));
-    const color = pct >= 0.7 ? "bg-emerald-500" : pct >= 0.4 ? "bg-amber-500" : "bg-rose-500";
+    const color = pct >= 0.7 ? "bg-success-solid" : pct >= 0.4 ? "bg-warning-solid" : "bg-destructive-solid";
     return (
       <span className="inline-flex items-center gap-2">
         <span className="relative h-1.5 w-16 overflow-hidden rounded-full bg-muted">
@@ -220,7 +221,7 @@ function TagsInput({ value, onChange }: { value: unknown; onChange: (v: unknown)
     setDraft("");
   };
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-input px-2 py-1.5">
+    <div className="flex flex-wrap items-center gap-1.5 rounded-sm px-2 py-1.5 shadow-edge">
       {tags.map((t) => (
         <span key={t} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs">
           {t}
@@ -261,7 +262,7 @@ export function CustomFieldsSection({
   if (defs.length === 0) return null;
   return (
     <>
-      <div className="eyebrow">Custom</div>
+      <div className="section-label">Custom</div>
       <div className="grid grid-cols-2 gap-3">
         {defs.map((def) => (
           <div key={def.id} className={cn("flex flex-col gap-1.5", isFullWidth(def) && "col-span-2")}>

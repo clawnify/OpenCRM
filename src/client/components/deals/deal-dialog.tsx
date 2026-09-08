@@ -100,7 +100,7 @@ export function DealDialog({
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <div className="eyebrow">Deal</div>
+          <div className="section-label">Deal</div>
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="name">Name</Label>

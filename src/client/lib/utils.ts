@@ -5,26 +5,35 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Map a color token (e.g. "sky") to a set of Tailwind classes for a card / badge surface. */
+/** Category colour families from DESIGN.md: tint (fill) / text / solid (dot, bar),
+ *  generated at fixed lightness and chroma per role so every family reads equally
+ *  vivid and every text-on-tint pair passes contrast. */
 export const colorPalette = {
-  sky:     { bg: "bg-sky-100",     border: "border-sky-300",     text: "text-sky-900",     ring: "ring-sky-400",     dot: "bg-sky-500" },
-  emerald: { bg: "bg-emerald-100", border: "border-emerald-300", text: "text-emerald-900", ring: "ring-emerald-400", dot: "bg-emerald-500" },
-  amber:   { bg: "bg-amber-100",   border: "border-amber-300",   text: "text-amber-900",   ring: "ring-amber-400",   dot: "bg-amber-500" },
-  rose:    { bg: "bg-rose-100",    border: "border-rose-300",    text: "text-rose-900",    ring: "ring-rose-400",    dot: "bg-rose-500" },
-  violet:  { bg: "bg-violet-100",  border: "border-violet-300",  text: "text-violet-900",  ring: "ring-violet-400",  dot: "bg-violet-500" },
-  fuchsia: { bg: "bg-fuchsia-100", border: "border-fuchsia-300", text: "text-fuchsia-900", ring: "ring-fuchsia-400", dot: "bg-fuchsia-500" },
-  teal:    { bg: "bg-teal-100",    border: "border-teal-300",    text: "text-teal-900",    ring: "ring-teal-400",    dot: "bg-teal-500" },
-  orange:  { bg: "bg-orange-100",  border: "border-orange-300",  text: "text-orange-900",  ring: "ring-orange-400",  dot: "bg-orange-500" },
-  slate:   { bg: "bg-slate-100",   border: "border-slate-300",   text: "text-slate-900",   ring: "ring-slate-400",   dot: "bg-slate-500" },
+  c0: { bg: "bg-cat-0-tint", border: "border-cat-0-solid", text: "text-cat-0-text", ring: "ring-cat-0-solid", dot: "bg-cat-0-solid" },
+  c1: { bg: "bg-cat-1-tint", border: "border-cat-1-solid", text: "text-cat-1-text", ring: "ring-cat-1-solid", dot: "bg-cat-1-solid" },
+  c2: { bg: "bg-cat-2-tint", border: "border-cat-2-solid", text: "text-cat-2-text", ring: "ring-cat-2-solid", dot: "bg-cat-2-solid" },
+  c3: { bg: "bg-cat-3-tint", border: "border-cat-3-solid", text: "text-cat-3-text", ring: "ring-cat-3-solid", dot: "bg-cat-3-solid" },
+  c4: { bg: "bg-cat-4-tint", border: "border-cat-4-solid", text: "text-cat-4-text", ring: "ring-cat-4-solid", dot: "bg-cat-4-solid" },
+  c5: { bg: "bg-cat-5-tint", border: "border-cat-5-solid", text: "text-cat-5-text", ring: "ring-cat-5-solid", dot: "bg-cat-5-solid" },
+  c6: { bg: "bg-cat-6-tint", border: "border-cat-6-solid", text: "text-cat-6-text", ring: "ring-cat-6-solid", dot: "bg-cat-6-solid" },
+  c7: { bg: "bg-cat-7-tint", border: "border-cat-7-solid", text: "text-cat-7-text", ring: "ring-cat-7-solid", dot: "bg-cat-7-solid" },
+  c8: { bg: "bg-cat-8-tint", border: "border-cat-8-solid", text: "text-cat-8-text", ring: "ring-cat-8-solid", dot: "bg-cat-8-solid" },
+  c9: { bg: "bg-cat-9-tint", border: "border-cat-9-solid", text: "text-cat-9-text", ring: "ring-cat-9-solid", dot: "bg-cat-9-solid" },
+  /* Semantic states map to the status families, never to a category stop. */
+  info:    { bg: "bg-info-tint", border: "border-info-solid", text: "text-info", ring: "ring-info-solid", dot: "bg-info-solid" },
+  success: { bg: "bg-success-tint", border: "border-success-solid", text: "text-success", ring: "ring-success-solid", dot: "bg-success-solid" },
+  warning: { bg: "bg-warning-tint", border: "border-warning-solid", text: "text-warning", ring: "ring-warning-solid", dot: "bg-warning-solid" },
+  danger:  { bg: "bg-destructive-tint", border: "border-destructive-solid", text: "text-destructive", ring: "ring-destructive-solid", dot: "bg-destructive-solid" },
+  slate: { bg: "bg-cat-neutral-tint", border: "border-cat-neutral-solid", text: "text-cat-neutral-text", ring: "ring-cat-neutral-solid", dot: "bg-cat-neutral-solid" },
 } as const;
 
 export type ColorToken = keyof typeof colorPalette;
 
 export function colorClasses(token: string | null | undefined): typeof colorPalette[ColorToken] {
-  return colorPalette[(token as ColorToken)] ?? colorPalette.sky;
+  return colorPalette[(token as ColorToken)] ?? colorPalette.c0;
 }
 
-const TOKENS = Object.keys(colorPalette) as ColorToken[];
+const TOKENS = (Object.keys(colorPalette) as ColorToken[]).filter((k) => !["slate", "info", "success", "warning", "danger"].includes(k));
 
 /** Deterministically map any string to a stable category color token (DESIGN-APPS
  *  signature #4 — color = data). The same value always gets the same color. */

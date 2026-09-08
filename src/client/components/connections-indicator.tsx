@@ -23,9 +23,8 @@ export function ConnectionsIndicator() {
             <TooltipTrigger asChild>
               <span
                 className={cn(
-                  "inline-flex size-7 items-center justify-center rounded-sm border",
-                  on ? "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-400"
-                     : "border-border bg-secondary text-muted-foreground",
+                  "inline-flex size-7 items-center justify-center rounded-sm",
+                  on ? "bg-success-tint text-success" : "bg-secondary text-muted-foreground",
                 )}
               >
                 <Icon className="size-3.5" />

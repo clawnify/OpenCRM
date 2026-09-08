@@ -36,7 +36,7 @@ const OPS: Record<FilterField["type"], { op: Filter["op"]; label: string }[]> = 
 };
 
 const needsValue = (op: Filter["op"]) => op !== "is_empty" && op !== "is_not_empty";
-const control = "h-8 rounded-md border border-input bg-background px-2 text-sm";
+const control = "h-8 rounded-sm bg-card px-2 text-sm shadow-edge";
 
 export function TableFilter({ fields, filters, onChange }: {
   fields: FilterField[];
@@ -90,8 +90,8 @@ export function TableFilter({ fields, filters, onChange }: {
       </Button>
 
       {open && (
-        <div className="absolute right-0 top-9 z-50 w-80 rounded-lg border border-border bg-background p-3 shadow-xl">
-          <div className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Add filter</div>
+        <div className="absolute right-0 top-9 z-50 w-80 rounded-md bg-popover p-3 shadow-float">
+          <div className="mb-2 text-[0.8125rem] font-medium text-muted-foreground">Add filter</div>
           <div className="flex flex-col gap-2">
             <select className={control} value={fieldKey} onChange={(e) => setFieldKey(e.target.value)}>
               {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}

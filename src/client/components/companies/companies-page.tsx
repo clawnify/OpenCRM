@@ -3,7 +3,6 @@ import { Search, Plus, Upload, Pencil, Trash2, ChevronUp, ChevronDown, ExternalL
 import { useCrm } from "@/context";
 import { PageHeader, EntityIcon, CategoryBadge, EmptyState } from "@/components/shared";
 import { CompanyDialog } from "@/components/companies/company-dialog";
-import { CompanyPreview } from "@/components/companies/company-preview";
 import { TableFilter, fieldsFromDefs } from "@/components/table-filter";
 import { ImportDialog } from "@/components/import-dialog";
 import { companyImportConfig } from "@/lib/import-config";
@@ -15,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { CustomFieldDisplay, readCustom } from "@/lib/custom-fields";
 import type { Company } from "@/types";
 
-export function CompaniesPage() {
+export function CompaniesPage({ navigate }: { navigate: (to: string) => void }) {
   const { companies, companiesPag, stats, setCompaniesPage, setCompaniesSort, setCompaniesSearch, setCompaniesFilters, deleteCompany, customFields } = useCrm();
   const companyFields = customFields.filter((d) => d.entity_type === "company");
   const filterFields = fieldsFromDefs(
@@ -32,8 +31,6 @@ export function CompaniesPage() {
   const [search, setSearch] = useState(companiesPag.search);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [editing, setEditing] = useState<Company | undefined>(undefined);
-  const [preview, setPreview] = useState<Company | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Company | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -44,11 +41,6 @@ export function CompaniesPage() {
   }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openCreate = () => {
-    setEditing(undefined);
-    setDialogOpen(true);
-  };
-  const openEdit = (c: Company) => {
-    setEditing(c);
     setDialogOpen(true);
   };
 
@@ -82,7 +74,7 @@ export function CompaniesPage() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search companies…"
             aria-label="Search companies"
-            className="h-9 w-56 pl-8"
+            className="h-7 w-56 pl-8"
           />
         </div>
         <TableFilter fields={filterFields} filters={companiesPag.filters} onChange={setCompaniesFilters} />
@@ -113,7 +105,7 @@ export function CompaniesPage() {
               </TableHeader>
               <TableBody>
                 {companies.map((c) => (
-                  <TableRow key={c.id} className="cursor-pointer hover:bg-secondary" onClick={() => setPreview(c)}>
+                  <TableRow key={c.id} className="cursor-pointer hover:bg-secondary" onClick={() => navigate(`/companies/${c.id}`)}>
                     <TableCell>
                       <span className="flex min-w-0 items-center gap-2.5 font-medium">
                         <EntityIcon name={c.name} domain={c.domain} />
@@ -127,7 +119,7 @@ export function CompaniesPage() {
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex max-w-full items-center gap-1 align-middle text-[var(--ring)] hover:underline"
+                          className="inline-flex max-w-full items-center gap-1 align-middle text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground"
                         >
                           <span className="truncate">{c.domain.replace(/^https?:\/\//i, "").replace(/\/$/, "")}</span>
                           <ExternalLink className="size-3 shrink-0" />
@@ -154,7 +146,7 @@ export function CompaniesPage() {
                           variant="ghost"
                           className="size-8"
                           aria-label={`Edit ${c.name || "company"}`}
-                          onClick={() => openEdit(c)}
+                          onClick={() => navigate(`/companies/${c.id}`)}
                         >
                           <Pencil className="size-4" />
                         </Button>
@@ -203,13 +195,8 @@ export function CompaniesPage() {
         </div>
       )}
 
-      <CompanyDialog open={dialogOpen} onOpenChange={setDialogOpen} company={editing} />
+      <CompanyDialog open={dialogOpen} onOpenChange={setDialogOpen} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} config={companyImportConfig} />
-      <CompanyPreview
-        company={preview}
-        onClose={() => setPreview(null)}
-        onEdit={(c) => { setPreview(null); openEdit(c); }}
-      />
 
       <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent className="max-w-sm">
@@ -254,7 +241,7 @@ function SortHeader({
       <button
         onClick={() => onSort(col)}
         aria-label={`Sort by ${col}`}
-        className={cn("inline-flex items-center gap-1 uppercase tracking-wider hover:text-foreground", active && "text-foreground")}
+        className={cn("inline-flex items-center gap-1 hover:text-foreground", active && "text-foreground")}
       >
         {children}
         {active && (pag.order === "asc" ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />)}

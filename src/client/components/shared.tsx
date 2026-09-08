@@ -41,7 +41,7 @@ export function CategoryBadge({ value, className }: { value?: string | null; cla
   return (
     <span
       title={value}
-      className={cn("inline-block max-w-[12rem] truncate rounded-full border px-2 py-0.5 align-middle text-xs font-normal capitalize", c.bg, c.text, c.border, className)}
+      className={cn("inline-block max-w-[12rem] truncate rounded-full px-2.5 py-1 align-middle text-xs font-medium capitalize", c.bg, c.text, className)}
     >
       {value}
     </span>
@@ -51,9 +51,9 @@ export function CategoryBadge({ value, className }: { value?: string | null; cla
 /** Sticky page toolbar: heading-1 left (with live count), actions right. */
 export function PageHeader({ title, count, children }: { title: string; count?: number; children?: ReactNode }) {
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-border px-6 py-3">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-6">
       <div className="flex items-baseline gap-2.5">
-        <h1 className="text-xl font-bold tracking-tight">{title}</h1>
+        <h1 className="text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</h1>
         {count !== undefined && (
           <span className="tabular text-[0.8125rem] text-muted-foreground">{count} {count === 1 ? "record" : "records"}</span>
         )}
@@ -67,7 +67,7 @@ export function PageHeader({ title, count, children }: { title: string; count?: 
 export function EmptyState({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 p-12 text-center">
-      <p className="text-sm text-muted-foreground">{title}</p>
+      <p className="text-muted-foreground">{title}</p>
       {action}
     </div>
   );
