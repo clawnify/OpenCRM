@@ -1,7 +1,7 @@
 import { useCrmState } from "./hooks/use-crm";
 import { CrmContext } from "./context";
 import { useRouter } from "./hooks/use-router";
-import { Sidebar } from "./components/sidebar";
+import { Nav } from "./components/nav";
 import { ErrorBanner } from "./components/error-banner";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { ContactsPage } from "./components/contacts/contacts-page";
@@ -13,13 +13,13 @@ import { PropertiesPage } from "./components/properties/properties-page";
 export function App() {
   const isAgent = document.documentElement.hasAttribute("data-agent");
   const state = useCrmState(isAgent);
-  const { route, navigate } = useRouter();
+  const { path, route, navigate } = useRouter();
 
   return (
     <CrmContext.Provider value={state}>
     <TooltipProvider delayDuration={200}>
-      <div className="flex h-screen min-h-0 overflow-hidden bg-background text-foreground">
-        <Sidebar route={route} navigate={navigate} />
+      <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row">
+        <Nav route={route} path={path} navigate={navigate} />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {state.loading ? (
             <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>
