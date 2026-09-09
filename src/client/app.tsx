@@ -59,7 +59,7 @@ export function App() {
   return (
     <CrmContext.Provider value={state}>
     <TooltipProvider delayDuration={200}>
-      <div className="flex h-screen min-h-0 overflow-hidden bg-background text-foreground" data-nav-collapsed={navCollapsed || undefined}>
+      <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row" data-nav-collapsed={navCollapsed || undefined}>
         {/* flex, so the SDK aside stretches to the row height like a direct child */}
         <div className="relative flex shrink-0">
           <button
@@ -67,7 +67,7 @@ export function App() {
             onClick={() => setNavCollapsed((v) => !v)}
             aria-label={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="absolute right-2 top-3.5 z-10 inline-flex size-7 items-center justify-center rounded-[0.5rem] text-muted-foreground hover:bg-border/60 hover:text-foreground"
+            className="absolute right-2 top-3.5 z-10 hidden size-7 items-center justify-center rounded-[0.5rem] text-muted-foreground hover:bg-border/60 hover:text-foreground md:inline-flex"
           >
             <PanelLeft className="size-4" />
           </button>
