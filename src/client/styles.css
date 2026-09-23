@@ -223,6 +223,11 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    /* Quiet scrollbars everywhere: a thin thumb in the border tone on no
+       track. Set on every element, because scrollbar-width isn't inherited
+       (scrollbar-color is, but it lives here too for one rule, one place). */
+    scrollbar-color: var(--border) transparent;
+    scrollbar-width: thin;
   }
   body {
     @apply bg-background text-foreground;
