@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link2, Plus, X } from "lucide-react";
 import { useCrm } from "@/context";
 import { Attr, DetailsSection } from "@/components/record-page";
@@ -10,6 +10,46 @@ import type { CustomFieldDef, EntityType, RelationRecord, RelationValue } from "
 const API_PATH: Record<EntityType, string> = { contact: "contacts", company: "companies", deal: "deals" };
 
 type Row = { id: string; relations?: Record<string, RelationValue> };
+
+/** Links record `id` of `entity` to `parent` (or unlinks it, with null) by writing its many_to_one field. */
+export function linkRecord(entity: EntityType, id: string, inverseKey: string, parent: string | null) {
+  return api("PUT", `/api/${API_PATH[entity]}/${encodeURIComponent(id)}`, { [inverseKey]: parent });
+}
+
+/**
+ * The records on a one_to_many side, to link and unlink from a picker that
+ * stays open: every linked record highlighted, a pick toggles it. Reads the
+ * parent once for its full list (a list row only carries the first few).
+ */
+export function ManyPicker({ parentEntity, parentId, def, inverseKey }: {
+  parentEntity: EntityType;
+  parentId: string;
+  def: CustomFieldDef;
+  inverseKey: string;
+}) {
+  const { setError, recordsChanged } = useCrm();
+  const [linked, setLinked] = useState<string[] | null>(null);
+  useEffect(() => {
+    api<Record<string, Row>>("GET", `/api/${API_PATH[parentEntity]}/${encodeURIComponent(parentId)}`).then((data) => {
+      const v = Object.values(data)[0]?.relations?.[def.key];
+      setLinked(v && "items" in v ? v.items.map((r) => r.id) : []);
+    }, () => setLinked([]));
+  }, [parentEntity, parentId, def.key]);
+
+  const toggle = async (id: string) => {
+    const on = linked?.includes(id);
+    setLinked((l) => (on ? (l ?? []).filter((x) => x !== id) : [...(l ?? []), id]));
+    try {
+      await linkRecord(def.target_entity!, id, inverseKey, on ? null : parentId);
+      await recordsChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save");
+    }
+  };
+
+  if (!linked) return <div className="py-4 text-center text-[13px] text-muted-foreground">Loading…</div>;
+  return <RecordPicker entity={def.target_entity!} selected={linked} creatable onPick={(r) => void toggle(r.id)} />;
+}
 
 /** A record's many_to_one relations as attribute rows: the linked record is the control. */
 export function RelationAttrs({ defs, row, onSave }: {
@@ -40,24 +80,23 @@ export function RelationAttrs({ defs, row, onSave }: {
  * chips, "+" to link another (it moves from whatever it was linked to), and
  * × to unlink one. Linking writes the other record's many_to_one field.
  */
-export function RelationSections({ defs, row, onChanged }: {
+export function RelationSections({ defs, row }: {
   defs: CustomFieldDef[];
   row: Row;
-  onChanged: () => Promise<void>;
 }) {
   const { customFields } = useCrm();
   return (
     <>
       {defs.filter((d) => d.relation_type === "one_to_many" && d.target_entity).map((def) => {
         const inverse = customFields.find((d) => d.id === def.inverse_def_id);
-        return inverse && <ManySection key={def.id} def={def} inverseKey={inverse.key} row={row} onChanged={onChanged} />;
+        return inverse && <ManySection key={def.id} def={def} inverseKey={inverse.key} row={row} />;
       })}
     </>
   );
 }
 
-function ManySection({ def, inverseKey, row, onChanged }: { def: CustomFieldDef; inverseKey: string; row: Row; onChanged: () => Promise<void> }) {
-  const { setError } = useCrm();
+function ManySection({ def, inverseKey, row }: { def: CustomFieldDef; inverseKey: string; row: Row }) {
+  const { setError, recordsChanged } = useCrm();
   const [open, setOpen] = useState(false);
   const entity = def.target_entity!;
   const value = row.relations?.[def.key];
@@ -66,8 +105,8 @@ function ManySection({ def, inverseKey, row, onChanged }: { def: CustomFieldDef;
 
   const link = async (id: string, parent: string | null) => {
     try {
-      await api("PUT", `/api/${API_PATH[entity]}/${encodeURIComponent(id)}`, { [inverseKey]: parent });
-      await onChanged();
+      await linkRecord(entity, id, inverseKey, parent);
+      await recordsChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save");
     }
@@ -84,7 +123,7 @@ function ManySection({ def, inverseKey, row, onChanged }: { def: CustomFieldDef;
             </button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-64">
-            <RecordPicker entity={entity} selected={linked} onPick={(r) => void link(r.id, linked.includes(r.id) ? null : row.id)} />
+            <RecordPicker entity={entity} selected={linked} creatable onPick={(r) => void link(r.id, linked.includes(r.id) ? null : row.id)} />
           </PopoverContent>
         </Popover>
       }

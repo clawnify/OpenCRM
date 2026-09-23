@@ -9,11 +9,12 @@
  */
 
 import { useEffect, useState, useSyncExternalStore, type MouseEvent } from "react";
-import { Ban, Handshake } from "lucide-react";
+import { Ban, Handshake, Plus } from "lucide-react";
 import { Avatar, EntityIcon } from "@/components/shared";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { api } from "@/api";
+import { useCrm } from "@/context";
 import { go } from "@/hooks/use-router";
 import { cn } from "@/lib/utils";
 import type { RecordColumn } from "@/components/record-table";
@@ -60,6 +61,19 @@ export async function searchRecords(entity: EntityType, search: string): Promise
   const { records } = await api<{ records: RelationRecord[] }>("GET", `/api/records?entity=${entity}&search=${encodeURIComponent(search)}`);
   remember(entity, records);
   return records;
+}
+
+const CREATE_PATH: Record<EntityType, string> = { contact: "contacts", company: "companies", deal: "deals" };
+
+/** A new record of `entity` from just a name, as a picker's "+ Add" makes it. */
+export async function createRecord(entity: EntityType, name: string): Promise<RelationRecord> {
+  const [first, ...rest] = name.trim().split(/\s+/);
+  const body = entity === "contact" ? { first_name: first, last_name: rest.join(" ") } : { name: name.trim() };
+  const data = await api<Record<string, { id: string; domain?: string }>>("POST", `/api/${CREATE_PATH[entity]}`, body);
+  const created = Object.values(data)[0];
+  const record = { id: created.id, label: name.trim(), domain: created.domain ?? null };
+  remember(entity, [record]);
+  return record;
 }
 
 /**
@@ -174,15 +188,30 @@ export function relationColumn<T>(def: CustomFieldDef): RecordColumn<T> {
  * is how it's removed. With `onClear`, a first row ("No company") empties a
  * single value, highlighted while nothing is picked.
  */
-export function RecordPicker({ entity, selected, onPick, onClear, emptyLabel, placeholder }: {
+export function RecordPicker({ entity, selected, onPick, onClear, emptyLabel, placeholder, creatable = false }: {
   entity: EntityType;
   selected: string[];
   onPick: (record: RelationRecord) => void;
   onClear?: () => void;
   emptyLabel?: string;
   placeholder?: string;
+  /** Offers "+ Add "<search>"", which creates the record and picks it. */
+  creatable?: boolean;
 }) {
+  const { setError } = useCrm();
   const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
+  const create = async () => {
+    setCreating(true);
+    try {
+      onPick(await createRecord(entity, search));
+      setSearch("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create it");
+    } finally {
+      setCreating(false);
+    }
+  };
   const [results, setResults] = useState<RelationRecord[] | null>(null);
   const name = useRecordNames(selected.map((id) => ({ entity, id })));
 
@@ -207,7 +236,7 @@ export function RecordPicker({ entity, selected, onPick, onClear, emptyLabel, pl
       <CommandList>
         {results === null
           ? <div className="py-4 text-center text-[13px] text-muted-foreground">Loadingâ€¦</div>
-          : <CommandEmpty>No match.</CommandEmpty>}
+          : !(creatable && search.trim()) && <CommandEmpty>No match.</CommandEmpty>}
         <CommandGroup>
           {onClear && !search && (
             <CommandItem value="__none" onSelect={onClear} aria-selected={!selected.length} className={cn(!selected.length && "bg-secondary font-medium")}>
@@ -225,6 +254,14 @@ export function RecordPicker({ entity, selected, onPick, onClear, emptyLabel, pl
             );
           })}
         </CommandGroup>
+        {creatable && search.trim() && (
+          <CommandGroup forceMount className="border-t border-border">
+            <CommandItem forceMount value="__create" disabled={creating} onSelect={() => void create()}>
+              <Plus className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">Add "{search.trim()}"</span>
+            </CommandItem>
+          </CommandGroup>
+        )}
       </CommandList>
     </Command>
   );
@@ -262,6 +299,7 @@ export function RelationInput({ entity, value, onChange, placeholder = "Selectâ€
         <RecordPicker
           entity={entity}
           selected={value ? [value] : []}
+          creatable
           emptyLabel={emptyLabel}
           onClear={() => { setOpen(false); onChange(null); }}
           onPick={(r) => { setOpen(false); onChange(r.id === value ? null : r.id); }}

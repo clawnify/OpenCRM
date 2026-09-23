@@ -59,6 +59,11 @@ export interface CrmContextValue {
   customFields: CustomFieldDef[];
   refetchCustomFields: () => Promise<void>;
 
+  // Bumped on every record write; recordsChanged() bumps it and refetches the
+  // lists, after a write made outside the functions above (linking a record).
+  changes: number;
+  recordsChanged: () => Promise<void>;
+
   // Pipeline stages (data-driven vocabulary, ordered by position)
   stages: StageDef[];
   refetchStages: () => Promise<void>;

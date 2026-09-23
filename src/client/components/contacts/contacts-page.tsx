@@ -87,8 +87,8 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
       edit: optionEdit("status", STATUSES.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })), saveCell),
       render: (c) => <CategoryBadge value={c.status} />,
     },
-    ...contactFields.map((def): RecordColumn<Contact> => def.field_type === "relation" ? { ...relationColumn<Contact>(def), edit: customFieldEdit(def, saveCell) } : ({
-      key: def.key, label: def.label, sort: def.key, kind: columnKind(def.field_type), edit: customFieldEdit(def, saveCell), copy: customFieldCopy(def),
+    ...contactFields.map((def): RecordColumn<Contact> => def.field_type === "relation" ? { ...relationColumn<Contact>(def), edit: customFieldEdit(def, saveCell, customFields) } : ({
+      key: def.key, label: def.label, sort: def.key, kind: columnKind(def.field_type), edit: customFieldEdit(def, saveCell, customFields), copy: customFieldCopy(def),
       text: (c) => String(readCustom(c, def.key) ?? ""),
       render: (c) => <CustomFieldDisplay def={def} value={readCustom(c, def.key)} />,
     })),

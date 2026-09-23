@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Mail, Calendar, StickyNote, MessageSquare, Trophy, Star, LayoutGrid, Activity as ActivityIcon, Phone, Building2, Briefcase, AtSign, User, Clock, CheckSquare } from "lucide-react";
 import { useCrm } from "@/context";
 import { Avatar, CategoryBadge, EntityIcon } from "@/components/shared";
@@ -47,7 +47,7 @@ function formatTimestamp(createdAt: string): string {
 // `panel` is the same record in the side panel beside the contacts list: one
 // column, no tab strip, and no highlight tiles repeating the details above them.
 export function ContactDetail({ id, navigate, panel = false }: { id: string; navigate: (to: string) => void; panel?: boolean }) {
-  const { fetchContact, fetchActivities, updateContact, emailContact, scheduleMeeting, addNote, connections, setError, customFields } = useCrm();
+  const { fetchContact, fetchActivities, updateContact, emailContact, scheduleMeeting, addNote, connections, setError, customFields, changes } = useCrm();
   const relationDefs = customFields.filter((d) => d.entity_type === "contact" && d.field_type === "relation");
 
   const [contact, setContact] = useState<Contact | null | undefined>(undefined);
@@ -69,7 +69,6 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
     if (!contact) return;
     try {
       await updateContact(contact.id, patch);
-      await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save");
     }
@@ -78,6 +77,13 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
     const fresh = await fetchContact(id);
     if (fresh) setContact(fresh);
   };
+  // Any record write (here, in the list, a link from another record) re-reads this one.
+  const seen = useRef(changes);
+  useEffect(() => {
+    if (seen.current === changes) return;
+    seen.current = changes;
+    void reload();
+  }, [changes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let alive = true;
@@ -276,7 +282,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
             <button type="button" className="mt-1 h-8 text-[0.8125rem] text-muted-foreground hover:text-foreground">View all values</button>
           </DetailsSection>
 
-          <RelationSections defs={relationDefs} row={contact} onChanged={reload} />
+          <RelationSections defs={relationDefs} row={contact} />
 
           <DetailsSection title="Lists" action={<button type="button" className="hover:text-foreground">Add to list</button>}>
             <p className="py-1 text-sm text-faint">This record has not been added to any lists</p>

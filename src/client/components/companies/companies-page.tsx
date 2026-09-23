@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { CustomFieldDisplay, readCustom } from "@/lib/custom-fields";
 import { relationColumn } from "@/lib/relations";
-import { customFieldCopy, customFieldEdit, textEdit } from "@/components/cell-editors";
+import { customFieldCopy, customFieldEdit, textEdit, valuesEdit } from "@/components/cell-editors";
 import { useTableView, useAggregates, listFilterQuery } from "@/hooks/use-table-view";
 import { downloadCsv } from "@/lib/csv";
 import type { Company } from "@/types";
@@ -79,9 +79,9 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
         )
         : dash,
     },
-    { key: "industry", label: "Industry", sort: "industry", text: (c) => c.industry, edit: textEdit("industry", saveCell), render: (c) => <CategoryBadge value={c.industry} /> },
-    ...companyFields.map((def): RecordColumn<Company> => def.field_type === "relation" ? { ...relationColumn<Company>(def), edit: customFieldEdit(def, saveCell) } : ({
-      key: def.key, label: def.label, sort: def.key, kind: columnKind(def.field_type), edit: customFieldEdit(def, saveCell), copy: customFieldCopy(def),
+    { key: "industry", label: "Industry", sort: "industry", text: (c) => c.industry, edit: valuesEdit("company", "industry", "Industry", saveCell), render: (c) => <CategoryBadge value={c.industry} /> },
+    ...companyFields.map((def): RecordColumn<Company> => def.field_type === "relation" ? { ...relationColumn<Company>(def), edit: customFieldEdit(def, saveCell, customFields) } : ({
+      key: def.key, label: def.label, sort: def.key, kind: columnKind(def.field_type), edit: customFieldEdit(def, saveCell, customFields), copy: customFieldCopy(def),
       text: (c) => String(readCustom(c, def.key) ?? ""),
       render: (c) => <CustomFieldDisplay def={def} value={readCustom(c, def.key)} />,
     })),

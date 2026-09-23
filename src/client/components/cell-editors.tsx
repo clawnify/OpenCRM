@@ -1,7 +1,11 @@
-import { Ban } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Ban, Plus } from "lucide-react";
+import { api } from "@/api";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { RecordPicker } from "@/lib/relations";
-import { readCustom } from "@/lib/custom-fields";
+import { CategoryBadge } from "@/components/shared";
+import { readCustom, TagsInput } from "@/lib/custom-fields";
+import { ManyPicker } from "@/components/record-relations";
 import { cn } from "@/lib/utils";
 import type { CellEdit } from "@/components/record-table";
 import type { CustomFieldDef } from "@/types";
@@ -38,6 +42,74 @@ export function OptionMenu({ options, value, onPick, emptyLabel }: {
       </CommandList>
     </Command>
   );
+}
+
+/**
+ * Pick a value the field already holds somewhere, or type a new one ("Add
+ * "Retail""): for a free-text field shown as a pill, like a company's industry.
+ * The current value is highlighted; `emptyLabel` clears it.
+ */
+export function ValuesMenu({ entity, field, value, onPick, emptyLabel }: {
+  entity: NonNullable<CustomFieldDef["target_entity"]>;
+  field: string;
+  value: string | null;
+  onPick: (value: string | null) => void;
+  emptyLabel?: string;
+}) {
+  const [values, setValues] = useState<string[] | null>(null);
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    api<{ values: string[] }>("GET", `/api/values?entity=${entity}&field=${encodeURIComponent(field)}`)
+      .then((d) => setValues(d.values), () => setValues([]));
+  }, [entity, field]);
+  const typed = search.trim();
+  const isNew = typed && !(values ?? []).some((v) => v.toLowerCase() === typed.toLowerCase());
+  return (
+    <Command>
+      <CommandInput autoFocus value={search} onValueChange={setSearch} placeholder="Search or add…" />
+      <CommandList>
+        {values === null && <div className="py-4 text-center text-[13px] text-muted-foreground">Loading…</div>}
+        <CommandGroup>
+          {emptyLabel && !typed && (
+            <CommandItem value={`__none ${emptyLabel}`} onSelect={() => onPick(null)} aria-selected={!value} className={cn(!value && "bg-secondary font-medium")}>
+              <Ban className="size-3.5 shrink-0 text-muted-foreground" /> {emptyLabel}
+            </CommandItem>
+          )}
+          {(values ?? []).map((v) => (
+            <CommandItem key={v} value={v} onSelect={() => onPick(v)} aria-selected={v === value} className={cn(v === value && "bg-secondary")}>
+              <CategoryBadge value={v} />
+            </CommandItem>
+          ))}
+        </CommandGroup>
+        {isNew && (
+          <CommandGroup forceMount className="border-t border-border">
+            <CommandItem forceMount value="__add" onSelect={() => onPick(typed)}>
+              <Plus className="size-3.5 shrink-0 text-muted-foreground" /> Add "{typed}"
+            </CommandItem>
+          </CommandGroup>
+        )}
+      </CommandList>
+    </Command>
+  );
+}
+
+/** A cell edit picking one of the values a free-text field already holds, or a new one. */
+export function valuesEdit<T>(entity: NonNullable<CustomFieldDef["target_entity"]>, key: string, label: string, save: Save<T>): CellEdit<T> {
+  return {
+    type: "menu",
+    render: (row, close) => {
+      const v = (row as Record<string, unknown>)[key];
+      return (
+        <ValuesMenu
+          entity={entity}
+          field={key}
+          value={v == null || v === "" ? null : String(v)}
+          emptyLabel={`No ${label.toLowerCase()}`}
+          onPick={(next) => { close(); void save(row, { [key]: next ?? "" }); }}
+        />
+      );
+    },
+  };
 }
 
 /** A text cell edit writing one field. `nullable`: an emptied value saves as null. */
@@ -82,6 +154,7 @@ export function recordEdit<T>(key: string, entity: NonNullable<CustomFieldDef["t
         <RecordPicker
           entity={entity}
           selected={typeof id === "string" && id ? [id] : []}
+          creatable
           emptyLabel={`No ${label.toLowerCase()}`}
           onClear={() => { close(); void save(row, { [key]: null }); }}
           onPick={(r) => { close(); void save(row, { [key]: r.id }); }}
@@ -97,16 +170,35 @@ export function customFieldCopy<T>(def: CustomFieldDef): ((row: T) => string) | 
   return (row) => String(readCustom(row, def.key) ?? "");
 }
 
+/** Tags in a cell: added and removed in place, each change saved as it's made. */
+function TagsCell({ initial, onSave }: { initial: unknown; onSave: (value: string) => Promise<void> }) {
+  const [value, setValue] = useState(initial);
+  return (
+    <div className="p-1.5">
+      <TagsInput value={value} onChange={(v) => { setValue(v); void onSave(String(v)); }} />
+    </div>
+  );
+}
+
 /**
- * How a custom field's cell edits, by type. None for tags (a list of values)
- * and a relation's one_to_many side (edited from the record's page).
+ * How a custom field's cell edits, by type. `defs` finds a relation's other
+ * side. None for a free JSON field.
  */
-export function customFieldEdit<T>(def: CustomFieldDef, save: Save<T>): CellEdit<T> | undefined {
+export function customFieldEdit<T extends { id: string }>(def: CustomFieldDef, save: Save<T>, defs: CustomFieldDef[]): CellEdit<T> | undefined {
   const read = (row: T) => readCustom(row, def.key);
   if (def.field_type === "relation") {
-    return def.relation_type === "many_to_one" && def.target_entity ? recordEdit(def.key, def.target_entity, def.label, save) : undefined;
+    if (!def.target_entity) return undefined;
+    if (def.relation_type === "many_to_one") return recordEdit(def.key, def.target_entity, def.label, save);
+    const inverse = defs.find((d) => d.id === def.inverse_def_id);
+    return inverse && {
+      type: "menu",
+      render: (row) => <ManyPicker parentEntity={def.entity_type} parentId={row.id} def={def} inverseKey={inverse.key} />,
+    };
   }
-  if (def.custom_field === "clawnify::tags.tags" || def.field_type === "json") return undefined;
+  if (def.custom_field === "clawnify::tags.tags") {
+    return { type: "menu", render: (row) => <TagsCell initial={read(row)} onSave={(v) => save(row, { [def.key]: v })} /> };
+  }
+  if (def.field_type === "json") return undefined;
   if (def.custom_field === "clawnify::badge.badge" || def.field_type === "enumeration") {
     const values = Array.isArray(def.options.enum) ? def.options.enum.map(String) : [];
     return optionEdit(def.key, values.map((v) => ({ value: v, label: v })), save, `No ${def.label.toLowerCase()}`);

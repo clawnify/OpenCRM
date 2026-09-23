@@ -2182,6 +2182,26 @@ app.get("/api/records", async (c) => {
   }
 });
 
+// The values a column already holds, for a picker that offers them (an
+// industry typed once is picked after). Any real column of the entity.
+app.get("/api/values", async (c) => {
+  try {
+    const entity = c.req.query("entity") ?? "";
+    if (!isEntityType(entity)) return c.json({ error: "entity must be contact, company or deal" }, 400);
+    const table = ENTITY_TABLES[entity];
+    const field = c.req.query("field") ?? "";
+    if (!(await tableColumns(table)).has(field)) return c.json({ error: `Unknown field "${field}"` }, 400);
+    const col = qid(field);
+    const rows = await query<{ v: string }>(
+      // One per value ignoring case: "consulting" and "Consulting" are one option.
+      `SELECT MIN(${col}) AS v FROM ${table} WHERE ${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} COLLATE NOCASE ORDER BY v COLLATE NOCASE LIMIT 200`,
+    );
+    return c.json({ values: rows.map((r) => String(r.v)) }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 // ── Custom properties (field definitions + schema-sync) ────────────
 
 app.get("/api/custom-fields", async (c) => {

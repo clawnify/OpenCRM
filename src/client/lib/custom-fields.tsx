@@ -219,7 +219,7 @@ export function CustomFieldInput({
   return <Input type={type} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />;
 }
 
-function TagsInput({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+export function TagsInput({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
   const tags = parseTags(value);
   const [draft, setDraft] = useState("");
   const commit = (next: string[]) => onChange(JSON.stringify(next));
