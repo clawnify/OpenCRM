@@ -4,6 +4,7 @@ import type {
   Contact, Company, Deal, Stats, PaginatedState, StageDef,
   Activity, ConnectionStatus, EntityType, CustomFieldDef, ImportRow, ImportEntity, ImportResult,
 } from "../types";
+import { sanitize } from "@/lib/filters";
 import type { CrmContextValue } from "../context";
 
 const defaultPag = (sort: string): PaginatedState => ({
@@ -15,7 +16,10 @@ function pagParams(pag: PaginatedState): URLSearchParams {
     page: String(pag.page), limit: String(pag.limit), sort: pag.sort, order: pag.order,
   });
   if (pag.search) p.set("search", pag.search);
-  if (pag.filters.length) p.set("filters", JSON.stringify(pag.filters));
+  const filters = sanitize(pag.filters);
+  if (filters.length) p.set("filters", JSON.stringify(filters));
+  // Date filters work in the viewer's local day.
+  p.set("tz", String(-new Date().getTimezoneOffset()));
   return p;
 }
 

@@ -1,3 +1,5 @@
+import type { FilterNode } from "./lib/filters";
+
 export type View = "contacts" | "companies" | "deals";
 export type EntityType = "contact" | "company" | "deal";
 
@@ -94,12 +96,6 @@ export interface Stats {
   dealValue: number;
 }
 
-export interface Filter {
-  field: string;
-  op: "contains" | "is" | "is_not" | "is_empty" | "is_not_empty" | "gt" | "lt";
-  value?: string;
-}
-
 export interface PaginatedState {
   page: number;
   limit: number;
@@ -107,7 +103,7 @@ export interface PaginatedState {
   sort: string;
   order: "asc" | "desc";
   search: string;
-  filters: Filter[];
+  filters: FilterNode[];
 }
 
 export interface Activity {

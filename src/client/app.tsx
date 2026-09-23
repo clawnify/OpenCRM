@@ -3,7 +3,7 @@ import { Building2, PanelLeft, Users } from "lucide-react";
 import { AppNav, reportLocation, type AppNavItem } from "@clawnify/app/client";
 import { useCrmState } from "./hooks/use-crm";
 import { CrmContext } from "./context";
-import { useRouter, type Route } from "./hooks/use-router";
+import { useRouter, withQuery, type Route } from "./hooks/use-router";
 import { ErrorBanner } from "./components/error-banner";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { ContactsPage } from "./components/contacts/contacts-page";
@@ -89,10 +89,10 @@ export function App() {
             <>
               {route.name === "contacts" && (
                 <div className="flex min-h-0 flex-1">
-                  <ContactsPage navigate={navigate} openId={openRecord} />
+                  <ContactsPage navigate={navigate} openId={openRecord} filtersParam={route.filters} />
                   {openRecord && (
                     <RecordPanel label="Contact">
-                      <RecordPanelHeader icon={Users} label="Contact" onExpand={() => navigate(`/contacts/${encodeURIComponent(openRecord)}`)} onClose={() => navigate("/contacts")} />
+                      <RecordPanelHeader icon={Users} label="Contact" onExpand={() => navigate(`/contacts/${encodeURIComponent(openRecord)}`)} onClose={() => navigate(withQuery({ record: null }))} />
                       <ContactDetail key={openRecord} id={openRecord} navigate={navigate} panel />
                     </RecordPanel>
                   )}
@@ -101,10 +101,10 @@ export function App() {
               {route.name === "contact" && <ContactDetail id={route.id} navigate={navigate} />}
               {route.name === "companies" && (
                 <div className="flex min-h-0 flex-1">
-                  <CompaniesPage navigate={navigate} openId={openRecord} />
+                  <CompaniesPage navigate={navigate} openId={openRecord} filtersParam={route.filters} />
                   {openRecord && (
                     <RecordPanel label="Company">
-                      <RecordPanelHeader icon={Building2} label="Company" onExpand={() => navigate(`/companies/${encodeURIComponent(openRecord)}`)} onClose={() => navigate("/companies")} />
+                      <RecordPanelHeader icon={Building2} label="Company" onExpand={() => navigate(`/companies/${encodeURIComponent(openRecord)}`)} onClose={() => navigate(withQuery({ record: null }))} />
                       <CompanyDetail key={openRecord} id={openRecord} navigate={navigate} panel />
                     </RecordPanel>
                   )}

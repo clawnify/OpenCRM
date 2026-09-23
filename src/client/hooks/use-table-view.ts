@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api";
 import { useCrm } from "@/context";
+import { sanitize, type FilterNode } from "@/lib/filters";
 import type { EntityType } from "@/types";
 
 interface ViewField {
@@ -120,9 +121,11 @@ export function useAggregates(path: string, listQuery: string, ops: Array<{ key:
 export type TableView = ReturnType<typeof useTableView>;
 
 /** The part of a list's query the footer totals share: search and filters, no paging. */
-export function listFilterQuery(pag: { search: string; filters: unknown[] }): string {
+export function listFilterQuery(pag: { search: string; filters: FilterNode[] }): string {
   const p = new URLSearchParams();
   if (pag.search) p.set("search", pag.search);
-  if (pag.filters.length) p.set("filters", JSON.stringify(pag.filters));
+  const filters = sanitize(pag.filters);
+  if (filters.length) p.set("filters", JSON.stringify(filters));
+  p.set("tz", String(-new Date().getTimezoneOffset()));
   return p.toString();
 }

@@ -3,21 +3,25 @@ import { useState, useEffect, useCallback } from "react";
 // A list route may carry `record`: the id open in the side panel beside the
 // table (`/contacts?record=<id>`). The record's own path (`/contacts/<id>`) is
 // the full page, so a deep link to a record still lands on the whole record.
+// `filters` opens a list pre-filtered (a filter tree, as the API takes it); the
+// list reads it once and drops it from the URL (see useListFilters).
 export type Route =
-  | { name: "contacts"; record?: string }
+  | { name: "contacts"; record?: string; filters?: string }
   | { name: "contact"; id: string }
-  | { name: "companies"; record?: string }
+  | { name: "companies"; record?: string; filters?: string }
   | { name: "company"; id: string }
   | { name: "deals" }
   | { name: "properties" }
   | { name: "not-found" };
 
 function parse(pathname: string, search: string): Route {
-  const record = new URLSearchParams(search).get("record") || undefined;
-  if (pathname === "/" || pathname === "/contacts") return { name: "contacts", record };
+  const q = new URLSearchParams(search);
+  const record = q.get("record") || undefined;
+  const filters = q.get("filters") ?? undefined;
+  if (pathname === "/" || pathname === "/contacts") return { name: "contacts", record, filters };
   const m = pathname.match(/^\/contacts\/([^/]+)$/);
   if (m) return { name: "contact", id: decodeURIComponent(m[1]) };
-  if (pathname === "/companies") return { name: "companies", record };
+  if (pathname === "/companies") return { name: "companies", record, filters };
   const cm = pathname.match(/^\/companies\/([^/]+)$/);
   if (cm) return { name: "company", id: decodeURIComponent(cm[1]) };
   if (pathname === "/deals") return { name: "deals" };
@@ -26,6 +30,17 @@ function parse(pathname: string, search: string): Route {
 }
 
 const current = () => window.location.pathname + window.location.search;
+
+/** The current path with some query params set (or removed, with null); the rest kept. */
+export function withQuery(changes: Record<string, string | null>): string {
+  const q = new URLSearchParams(window.location.search);
+  for (const [k, v] of Object.entries(changes)) {
+    if (v === null) q.delete(k);
+    else q.set(k, v);
+  }
+  const s = q.toString();
+  return window.location.pathname + (s ? `?${s}` : "");
+}
 
 export function useRouter() {
   const [path, setPath] = useState<string>(current);

@@ -3,7 +3,10 @@ import { Search, Plus, Upload, Trash2, Download, X, ExternalLink } from "lucide-
 import { useCrm } from "@/context";
 import { PageHeader, EntityIcon, CategoryBadge, EmptyState } from "@/components/shared";
 import { CompanyDialog } from "@/components/companies/company-dialog";
-import { TableFilter, fieldsFromDefs } from "@/components/table-filter";
+import { FilterBar } from "@/components/filter-bar";
+import { fieldsFromDefs, sanitize } from "@/lib/filters";
+import { useListFilters } from "@/hooks/use-list-filters";
+import { withQuery } from "@/hooks/use-router";
 import { ImportDialog } from "@/components/import-dialog";
 import { RecordTable, columnKind, type NameColumn, type RecordColumn } from "@/components/record-table";
 import { companyImportConfig } from "@/lib/import-config";
@@ -17,17 +20,19 @@ import type { Company } from "@/types";
 
 const dash = <span className="text-muted-foreground">—</span>;
 
-// `openId` is the company in the side panel beside the table, as ContactsPage.
-export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string }) {
+// `openId` and `filtersParam` as ContactsPage.
+export function CompaniesPage({ navigate, openId, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; filtersParam?: string }) {
   const { companies, companiesPag, stats, setCompaniesPage, setCompaniesSort, setCompaniesSearch, setCompaniesFilters, deleteCompanies, customFields, setError } = useCrm();
+  const listFilters = useListFilters({ entity: "company", param: filtersParam, current: companiesPag.filters, apply: setCompaniesFilters, navigate });
   const companyFields = customFields.filter((d) => d.entity_type === "company");
   const filterFields = fieldsFromDefs(
     [
-      { key: "name", label: "Name", type: "text" },
-      { key: "domain", label: "Domain", type: "text" },
-      { key: "industry", label: "Industry", type: "text" },
+      { key: "name", label: "Name", type: "text", column: "name" },
+      { key: "domain", label: "Domain", type: "text", column: "domain" },
+      { key: "industry", label: "Industry", type: "text", column: "industry" },
       { key: "phone", label: "Phone", type: "text" },
       { key: "email", label: "Email", type: "text" },
+      { key: "created_at", label: "Created", type: "date" },
     ],
     companyFields,
   );
@@ -104,7 +109,7 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
     companies,
   );
 
-  const openRecord = (id: string) => navigate(`/companies?record=${encodeURIComponent(id)}`, { replace: !!openId });
+  const openRecord = (id: string) => navigate(withQuery({ record: id }), { replace: !!openId });
   const totalPages = Math.max(1, Math.ceil(companiesPag.total / companiesPag.limit));
 
   const addButton = (
@@ -126,7 +131,7 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
     try {
       await deleteCompanies(ids);
       setConfirmOpen(false);
-      if (openId && ids.includes(openId)) navigate("/companies", { replace: true });
+      if (openId && ids.includes(openId)) navigate(withQuery({ record: null }), { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete");
     } finally {
@@ -165,7 +170,6 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
                 className="h-7 w-56 pl-8"
               />
             </div>
-            <TableFilter fields={filterFields} filters={companiesPag.filters} onChange={setCompaniesFilters} />
             <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
               <Upload className="size-4" />
               Import
@@ -174,8 +178,18 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
           </>
         )}
       </PageHeader>
+      <FilterBar
+        fields={filterFields}
+        filters={listFilters.filters}
+        onChange={listFilters.setFilters}
+        isVisible={view.visible}
+        dirty={listFilters.dirty}
+        onSave={listFilters.save}
+        onReset={listFilters.reset}
+      />
 
-      {companies.length === 0 ? (
+      {/* The first-run empty state is for an empty list, not a filtered one. */}
+      {companies.length === 0 && !companiesPag.search && sanitize(listFilters.filters).length === 0 ? (
         <EmptyState title="No companies yet. Add your first." action={addButton} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">

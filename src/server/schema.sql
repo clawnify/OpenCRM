@@ -118,6 +118,15 @@ CREATE TABLE IF NOT EXISTS view_fields (
   PRIMARY KEY (view_id, field_key)
 );
 
+-- Each list's saved filters: the filter tree (see buildFilters) everyone in
+-- the org opens the list with. Editing filters changes only the URL until
+-- someone saves the view; Reset goes back to this.
+CREATE TABLE IF NOT EXISTS list_views (
+  entity_type TEXT PRIMARY KEY,             -- 'contact' | 'company'
+  filters TEXT NOT NULL DEFAULT '[]',       -- JSON filter tree
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_id);
 CREATE INDEX IF NOT EXISTS idx_deals_contact ON deals(contact_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(status);
