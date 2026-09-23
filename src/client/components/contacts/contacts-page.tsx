@@ -35,7 +35,7 @@ export function ContactsPage({ navigate, openId }: { navigate: (to: string, opts
     ],
     contactFields,
   );
-  const view = useTableView("contact", { name: 220, email: 220, phone: 150, company: 180, title: 180, status: 130 });
+  const view = useTableView("contact", undefined, { name: 220, email: 220, phone: 150, company: 180, title: 180, status: 130 });
 
   const name: NameColumn<Contact> = {
     label: "Name",

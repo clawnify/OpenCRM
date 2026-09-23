@@ -24,7 +24,7 @@ Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with
 - **Path routing** — deep-linkable views and records: a row opens in a side panel beside the list (`/contacts?record=:id`), and expands to its full page (`/contacts/:id`)
 - **Rich cells** — avatars, category badges, company favicons, tabular currency, email/phone links
 - **Sorting, search, pagination** — server-side, debounced
-- **Record grid** — the name column and header stay pinned while you scroll; columns are resizable (drag the divider) and hideable (the `+` at the end of the header), and the layout is saved for the whole org; tick rows to export them as CSV or delete them in bulk; a footer calculates each column over the whole filtered list (count, empty %, unique, sum, average, min/max, earliest/latest), and "+ Add new" sits under the last row
+- **Record grid** — the name column and header stay pinned while you scroll; columns are resizable (drag the divider) and hideable (the `+` at the end of the header), and the layout is saved on the list's view for the whole org; tick rows to export them as CSV or delete them in bulk; a footer calculates each column over the whole filtered list (count, empty %, unique, sum, average, min/max, earliest/latest), and "+ Add new" sits under the last row
 - **Dual-mode UI** — human-optimized + AI-agent-optimized (`?agent=true`); dark mode follows the OS
 
 ## Quickstart
@@ -168,8 +168,9 @@ Contacts belong to companies. Deals belong to contacts (and inherit the company)
 | POST | `/api/deals` | Create a deal |
 | PUT | `/api/deals/:id` | Update a deal |
 | DELETE | `/api/deals/:id` | Delete a deal |
-| GET | `/api/view-fields?entity=` | A list's saved column layout (visibility, widths, footer calculations) |
-| PUT | `/api/view-fields/:entity/:key` | Show/hide, resize or set the footer calculation of one column (`{ visible?, size?, aggregate? }`) |
+| GET | `/api/views?entity=` | A list's named views (its default "All …" view is created on first use) |
+| GET | `/api/views/:id/fields` | A view's column layout (visibility, widths, footer calculations) |
+| PUT | `/api/views/:id/fields/:key` | Show/hide, resize or set the footer calculation of one column (`{ visible?, size?, aggregate? }`) |
 | GET | `/api/contacts/aggregates`, `/api/companies/aggregates` | Column totals over the filtered list (`ops=[{key, op}]` plus the list's `search`/`filters`) |
 
 ## Community & Contributions

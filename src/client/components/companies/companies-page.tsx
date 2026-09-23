@@ -31,7 +31,7 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
     ],
     companyFields,
   );
-  const view = useTableView("company", { name: 220, domain: 180, industry: 160, contacts: 112 });
+  const view = useTableView("company", undefined, { name: 220, domain: 180, industry: 160, contacts: 112 });
 
   const name: NameColumn<Company> = {
     label: "Name",

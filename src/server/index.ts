@@ -2072,25 +2072,53 @@ app.delete("/api/custom-fields/:id", async (c) => {
   return c.json({ ok: true }, 200);
 });
 
-// ── Table views (the lists' shared column layout) ──────────────────
+// ── Views (a list's named, shared layouts) ─────────────────────────
 
 const VIEW_FIELD_KEY = /^[a-z][a-z0-9_]*$/;
+const DEFAULT_VIEW_NAMES: Record<EntityType, string> = { contact: "All contacts", company: "All companies", deal: "All deals" };
 
-app.get("/api/view-fields", async (c) => {
+interface ViewRow { id: string; entity_type: string; name: string; icon: string; is_default: number; position: number }
+const viewJson = (v: ViewRow) => ({ id: v.id, entity: v.entity_type, name: v.name, icon: v.icon, isDefault: v.is_default === 1, position: v.position });
+
+/** The list's default view, created on first use. */
+async function ensureDefaultView(entity: EntityType): Promise<ViewRow> {
+  const find = () => get<ViewRow>("SELECT * FROM views WHERE entity_type = ? AND is_default = 1", [entity]);
+  const found = await find();
+  if (found) return found;
+  // The unique default index turns a racing second insert into a no-op.
+  await run(
+    "INSERT OR IGNORE INTO views (id, entity_type, name, icon, is_default, position) VALUES (?, ?, ?, 'table', 1, 0)",
+    [crypto.randomUUID(), entity, DEFAULT_VIEW_NAMES[entity]],
+  );
+  return (await find())!;
+}
+
+app.get("/api/views", async (c) => {
   const entity = c.req.query("entity") ?? "";
   if (!isEntityType(entity)) return c.json({ error: "Invalid entity" }, 400);
-  const fields = await query<{ field_key: string; is_visible: number; size: number | null; aggregate: string | null }>(
-    "SELECT field_key, is_visible, size, aggregate FROM view_fields WHERE entity_type = ?",
+  await ensureDefaultView(entity);
+  const views = await query<ViewRow>(
+    "SELECT * FROM views WHERE entity_type = ? ORDER BY is_default DESC, position, created_at",
     [entity],
+  );
+  return c.json({ views: views.map(viewJson) }, 200);
+});
+
+app.get("/api/views/:id/fields", async (c) => {
+  const id = c.req.param("id");
+  if (!(await get("SELECT id FROM views WHERE id = ?", [id]))) return c.json({ error: "View not found" }, 404);
+  const fields = await query<{ field_key: string; is_visible: number; size: number | null; aggregate: string | null }>(
+    "SELECT field_key, is_visible, size, aggregate FROM view_fields WHERE view_id = ?",
+    [id],
   );
   return c.json({ fields: fields.map((f) => ({ key: f.field_key, visible: f.is_visible === 1, size: f.size, aggregate: f.aggregate })) }, 200);
 });
 
-// Sets one column's visibility, width and/or footer aggregate, keeping
-// whatever isn't sent. `aggregate: null` clears the calculation.
-app.put("/api/view-fields/:entity/:key", async (c) => {
-  const { entity, key } = c.req.param();
-  if (!isEntityType(entity)) return c.json({ error: "Invalid entity" }, 400);
+// Sets one column's visibility, width and/or footer aggregate in a view,
+// keeping whatever isn't sent. `aggregate: null` clears the calculation.
+app.put("/api/views/:id/fields/:key", async (c) => {
+  const { id, key } = c.req.param();
+  if (!(await get("SELECT id FROM views WHERE id = ?", [id]))) return c.json({ error: "View not found" }, 404);
   if (!VIEW_FIELD_KEY.test(key)) return c.json({ error: "Invalid key" }, 400);
   const body = (await c.req.json().catch(() => ({}))) as { visible?: unknown; size?: unknown; aggregate?: unknown };
   if (body.visible !== undefined && typeof body.visible !== "boolean") return c.json({ error: "visible must be a boolean" }, 400);
@@ -2101,17 +2129,17 @@ app.put("/api/view-fields/:entity/:key", async (c) => {
     return c.json({ error: "Unknown aggregate" }, 400);
   }
   const prev = await get<{ is_visible: number; size: number | null; aggregate: string | null }>(
-    "SELECT is_visible, size, aggregate FROM view_fields WHERE entity_type = ? AND field_key = ?",
-    [entity, key],
+    "SELECT is_visible, size, aggregate FROM view_fields WHERE view_id = ? AND field_key = ?",
+    [id, key],
   );
   const visible = body.visible ?? (prev ? prev.is_visible === 1 : true);
   const size = (body.size as number | undefined) ?? prev?.size ?? null;
   const aggregate = body.aggregate === undefined ? prev?.aggregate ?? null : (body.aggregate as string | null);
   await run(
-    `INSERT INTO view_fields (entity_type, field_key, is_visible, size, aggregate, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(entity_type, field_key) DO UPDATE SET is_visible = excluded.is_visible, size = excluded.size,
+    `INSERT INTO view_fields (view_id, field_key, is_visible, size, aggregate, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(view_id, field_key) DO UPDATE SET is_visible = excluded.is_visible, size = excluded.size,
        aggregate = excluded.aggregate, updated_at = excluded.updated_at`,
-    [entity, key, visible ? 1 : 0, size, aggregate],
+    [id, key, visible ? 1 : 0, size, aggregate],
   );
   return c.json({ field: { key, visible, size, aggregate } }, 200);
 });
