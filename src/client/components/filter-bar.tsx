@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronLeft, Filter as FilterIcon, ListFilter, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, Filter as FilterIcon, ListFilter, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -16,12 +16,13 @@ type Open = { kind: "add"; editing?: number } | { kind: "rule"; index: number } 
 const chip = "inline-flex h-7 items-center gap-1 rounded-sm bg-card pl-2 pr-1 text-[0.8125rem] shadow-raised hover:bg-secondary";
 
 /**
- * The list's view row: one chip per basic filter, one "N advanced rules" chip,
- * "+ Filter", and Reset / Save view while the filters differ from the saved
- * view. Editing applies at once; a rule still being typed is left out of the
- * query until it has a value.
+ * The list's view row: the view switcher (`leading`), one chip per basic
+ * filter, one "N advanced rules" chip, "+ Filter", and Reset / Update view
+ * while the list differs from its view. Editing applies at once; a rule still
+ * being typed is left out of the query until it has a value.
  */
-export function FilterBar({ fields, filters, onChange, isVisible, dirty, onSave, onReset }: {
+export function FilterBar({ leading, fields, filters, onChange, isVisible, dirty, onSave, onReset }: {
+  leading?: ReactNode;
   fields: FilterField[];
   filters: FilterNode[];
   onChange: (next: FilterNode[]) => void;
@@ -75,6 +76,7 @@ export function FilterBar({ fields, filters, onChange, isVisible, dirty, onSave,
 
   return (
     <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-6 py-1.5">
+      {leading && <>{leading}<span className="mx-1 h-4 w-px bg-border" aria-hidden="true" /></>}
       {filters.map((n, i) => {
         if (isGroup(n)) return null;
         const field = fieldOf(n.field);
@@ -150,7 +152,7 @@ export function FilterBar({ fields, filters, onChange, isVisible, dirty, onSave,
       {dirty && (
         <div className="ml-auto flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={onReset}>Reset</Button>
-          <Button size="sm" variant="secondary" onClick={onSave}>Save view</Button>
+          <Button size="sm" variant="secondary" onClick={onSave}>Update view</Button>
         </div>
       )}
     </div>
@@ -249,8 +251,8 @@ function Picker({ label, items, value, onPick, className }: {
             <CommandEmpty>No match.</CommandEmpty>
             <CommandGroup>
               {items.map((it) => (
-                <CommandItem key={it.value} value={`${it.label} ${it.value}`} onSelect={() => { setOpen(false); onPick(it.value); }}>
-                  <Check className={cn("size-3.5", it.value === value ? "opacity-100" : "opacity-0")} /> {it.label}
+                <CommandItem key={it.value} value={`${it.label} ${it.value}`} onSelect={() => { setOpen(false); onPick(it.value); }} aria-selected={it.value === value} className={cn(it.value === value && "bg-secondary font-medium")}>
+                  {it.label}
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -299,8 +301,8 @@ function ValueInput({ field, rule, onChange, autoFocus = false, inline = false }
           <CommandEmpty>No options.</CommandEmpty>
           <CommandGroup>
             {(field.options ?? []).map((o) => (
-              <CommandItem key={o.value} value={`${o.label} ${o.value}`} onSelect={() => toggle(o.value)}>
-                <Check className={cn("size-3.5", selected.includes(o.value) ? "opacity-100" : "opacity-0")} /> {o.label}
+              <CommandItem key={o.value} value={`${o.label} ${o.value}`} onSelect={() => toggle(o.value)} aria-selected={selected.includes(o.value)} className={cn(selected.includes(o.value) && "bg-secondary font-medium")}>
+                {o.label}
               </CommandItem>
             ))}
           </CommandGroup>

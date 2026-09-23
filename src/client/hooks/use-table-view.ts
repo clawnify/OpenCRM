@@ -12,7 +12,7 @@ interface ViewField {
   aggregate: string | null;
 }
 
-/** A named, shared view of a list. Every list has one default ("All contacts"). */
+/** A named, shared view of a list: its filters, sort and columns. Every list has one default ("All contacts"). */
 export interface ListView {
   id: string;
   entity: EntityType;
@@ -20,6 +20,10 @@ export interface ListView {
   icon: string;
   isDefault: boolean;
   position: number;
+  filters: FilterNode[];
+  /** Null: the list's default order. */
+  sort: string | null;
+  order: "asc" | "desc" | null;
 }
 
 // Last layout seen per view, so a list that remounts (back from a record's

@@ -89,7 +89,7 @@ export function App() {
             <>
               {route.name === "contacts" && (
                 <div className="flex min-h-0 flex-1">
-                  <ContactsPage navigate={navigate} openId={openRecord} filtersParam={route.filters} />
+                  <ContactsPage navigate={navigate} openId={openRecord} viewParam={route.view} filtersParam={route.filters} />
                   {openRecord && (
                     <RecordPanel label="Contact">
                       <RecordPanelHeader icon={Users} label="Contact" onExpand={() => navigate(`/contacts/${encodeURIComponent(openRecord)}`)} onClose={() => navigate(withQuery({ record: null }))} />
@@ -101,7 +101,7 @@ export function App() {
               {route.name === "contact" && <ContactDetail id={route.id} navigate={navigate} />}
               {route.name === "companies" && (
                 <div className="flex min-h-0 flex-1">
-                  <CompaniesPage navigate={navigate} openId={openRecord} filtersParam={route.filters} />
+                  <CompaniesPage navigate={navigate} openId={openRecord} viewParam={route.view} filtersParam={route.filters} />
                   {openRecord && (
                     <RecordPanel label="Company">
                       <RecordPanelHeader icon={Building2} label="Company" onExpand={() => navigate(`/companies/${encodeURIComponent(openRecord)}`)} onClose={() => navigate(withQuery({ record: null }))} />

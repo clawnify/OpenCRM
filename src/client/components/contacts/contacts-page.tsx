@@ -6,7 +6,8 @@ import { ConnectionsIndicator } from "@/components/connections-indicator";
 import { ContactDialog, STATUSES } from "@/components/contacts/contact-dialog";
 import { FilterBar } from "@/components/filter-bar";
 import { fieldsFromDefs, sanitize } from "@/lib/filters";
-import { useListFilters } from "@/hooks/use-list-filters";
+import { useListView } from "@/hooks/use-list-view";
+import { ViewSwitcher } from "@/components/view-switcher";
 import { withQuery } from "@/hooks/use-router";
 import { ImportDialog } from "@/components/import-dialog";
 import { RecordTable, columnKind, type NameColumn, type RecordColumn } from "@/components/record-table";
@@ -24,10 +25,10 @@ const fullName = (c: Contact) => `${c.first_name} ${c.last_name}`.trim();
 
 // `openId` is the contact in the side panel beside the table, if any. Opening
 // another row swaps the panel's record in place of stacking history.
-// `filtersParam` is a link's `?filters=`, read once (see useListFilters).
-export function ContactsPage({ navigate, openId, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; filtersParam?: string }) {
-  const { contacts, contactsPag, stats, setContactsPage, setContactsSort, setContactsSearch, setContactsFilters, deleteContacts, customFields, setError } = useCrm();
-  const listFilters = useListFilters({ entity: "contact", param: filtersParam, current: contactsPag.filters, apply: setContactsFilters, navigate });
+// `viewParam` is the named view to show (absent: the default); `filtersParam`
+// a link's `?filters=`, read once (see useListView).
+export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; viewParam?: string; filtersParam?: string }) {
+  const { contacts, contactsPag, stats, setContactsPage, setContactsSort, setContactsSearch, setContactsFilters, setContactsView, deleteContacts, customFields, setError } = useCrm();
   const contactFields = customFields.filter((d) => d.entity_type === "contact");
   const filterFields = fieldsFromDefs(
     [
@@ -41,7 +42,8 @@ export function ContactsPage({ navigate, openId, filtersParam }: { navigate: (to
     ],
     contactFields,
   );
-  const view = useTableView("contact", undefined, { name: 220, email: 220, phone: 150, company: 180, title: 180, status: 130 });
+  const view = useTableView("contact", viewParam, { name: 220, email: 220, phone: 150, company: 180, title: 180, status: 130 });
+  const listView = useListView({ entity: "contact", table: view, filtersParam, pag: contactsPag, setFilters: setContactsFilters, setView: setContactsView, navigate });
 
   const name: NameColumn<Contact> = {
     label: "Name",
@@ -178,17 +180,28 @@ export function ContactsPage({ navigate, openId, filtersParam }: { navigate: (to
         )}
       </PageHeader>
       <FilterBar
+        leading={
+          <ViewSwitcher
+            views={listView.views}
+            current={listView.view}
+            count={contactsPag.total}
+            onOpen={listView.open}
+            onCreate={listView.create}
+            onRename={listView.rename}
+            onDelete={listView.remove}
+          />
+        }
         fields={filterFields}
-        filters={listFilters.filters}
-        onChange={listFilters.setFilters}
+        filters={listView.filters}
+        onChange={listView.setFilters}
         isVisible={view.visible}
-        dirty={listFilters.dirty}
-        onSave={listFilters.save}
-        onReset={listFilters.reset}
+        dirty={listView.dirty}
+        onSave={listView.update}
+        onReset={listView.reset}
       />
 
       {/* The first-run empty state is for an empty list, not a filtered one. */}
-      {contacts.length === 0 && !contactsPag.search && sanitize(listFilters.filters).length === 0 ? (
+      {contacts.length === 0 && !contactsPag.search && sanitize(listView.filters).length === 0 ? (
         <EmptyState
           title="No contacts yet. Add your first, or import a CSV/XLSX."
           action={

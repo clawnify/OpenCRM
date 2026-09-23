@@ -88,8 +88,10 @@ CREATE TABLE IF NOT EXISTS custom_field_defs (
   UNIQUE(entity_type, key)
 );
 
--- A list's named views, shared by everyone in the org. Each list has one
--- default view ("All contacts"), created on first use, which can't be deleted.
+-- A list's named views, shared by everyone in the org: its filters, sort and
+-- (in view_fields) columns. Each list has one default view ("All contacts"),
+-- created on first use, which can't be deleted. Editing filters or sort
+-- changes only the page until someone updates the view.
 CREATE TABLE IF NOT EXISTS views (
   id TEXT PRIMARY KEY,
   entity_type TEXT NOT NULL,                -- 'contact' | 'company'
@@ -97,6 +99,9 @@ CREATE TABLE IF NOT EXISTS views (
   icon TEXT NOT NULL DEFAULT 'table',
   is_default INTEGER NOT NULL DEFAULT 0,
   position REAL NOT NULL DEFAULT 0,
+  filters TEXT NOT NULL DEFAULT '[]',       -- JSON filter tree (see buildFilters)
+  sort TEXT,                                -- column; NULL = the list's default order
+  sort_order TEXT,                          -- 'asc' | 'desc'
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -116,15 +121,6 @@ CREATE TABLE IF NOT EXISTS view_fields (
   aggregate TEXT,                           -- footer calculation (count, sum…); NULL = none
   updated_at TEXT DEFAULT (datetime('now')),
   PRIMARY KEY (view_id, field_key)
-);
-
--- Each list's saved filters: the filter tree (see buildFilters) everyone in
--- the org opens the list with. Editing filters changes only the URL until
--- someone saves the view; Reset goes back to this.
-CREATE TABLE IF NOT EXISTS list_views (
-  entity_type TEXT PRIMARY KEY,             -- 'contact' | 'company'
-  filters TEXT NOT NULL DEFAULT '[]',       -- JSON filter tree
-  updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_id);

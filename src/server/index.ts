@@ -2186,8 +2186,37 @@ app.delete("/api/custom-fields/:id", async (c) => {
 const VIEW_FIELD_KEY = /^[a-z][a-z0-9_]*$/;
 const DEFAULT_VIEW_NAMES: Record<EntityType, string> = { contact: "All contacts", company: "All companies", deal: "All deals" };
 
-interface ViewRow { id: string; entity_type: string; name: string; icon: string; is_default: number; position: number }
-const viewJson = (v: ViewRow) => ({ id: v.id, entity: v.entity_type, name: v.name, icon: v.icon, isDefault: v.is_default === 1, position: v.position });
+interface ViewRow {
+  id: string; entity_type: string; name: string; icon: string; is_default: number; position: number;
+  filters: string; sort: string | null; sort_order: string | null;
+}
+const viewJson = (v: ViewRow) => {
+  let filters: unknown = [];
+  try { filters = JSON.parse(v.filters || "[]"); } catch { /* a bad row reads as no filters */ }
+  return {
+    id: v.id, entity: v.entity_type, name: v.name, icon: v.icon, isDefault: v.is_default === 1, position: v.position,
+    filters: Array.isArray(filters) ? filters : [], sort: v.sort, order: v.sort_order === "asc" ? "asc" : v.sort_order === "desc" ? "desc" : null,
+  };
+};
+
+/** A view name: trimmed, 1–60 characters. */
+function viewName(raw: unknown): string | null {
+  const name = typeof raw === "string" ? raw.trim() : "";
+  return name && name.length <= 60 ? name : null;
+}
+
+/** Validates a view's filters by compiling them against the list's real columns; the JSON to store, or an error. */
+async function viewFilters(entity: EntityType, raw: unknown): Promise<{ json: string } | { error: string }> {
+  if (!Array.isArray(raw)) return { error: "filters must be an array" };
+  const json = JSON.stringify(raw);
+  if (json.length > 20_000) return { error: "filters too large" };
+  try {
+    buildFilters(await tableColumns(ENTITY_TABLES[entity]), json);
+  } catch (err: unknown) {
+    return { error: (err as Error).message };
+  }
+  return { json };
+}
 
 /** The list's default view, created on first use. */
 async function ensureDefaultView(entity: EntityType): Promise<ViewRow> {
@@ -2253,35 +2282,75 @@ app.put("/api/views/:id/fields/:key", async (c) => {
   return c.json({ field: { key, visible, size, aggregate } }, 200);
 });
 
-// A list's saved filters: what everyone opens the list with.
-app.get("/api/list-views/:entity", async (c) => {
-  const entity = c.req.param("entity");
+// Creates a view from the list's current state: its filters and sort, and
+// the columns of the view it was made from (`from`).
+app.post("/api/views", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { entity?: unknown; name?: unknown; from?: unknown; filters?: unknown; sort?: unknown; order?: unknown };
+  const entity = typeof body.entity === "string" ? body.entity : "";
   if (!isEntityType(entity)) return c.json({ error: "Invalid entity" }, 400);
-  const row = await get<{ filters: string }>("SELECT filters FROM list_views WHERE entity_type = ?", [entity]);
-  let filters: unknown = [];
-  try { filters = JSON.parse(row?.filters || "[]"); } catch { /* a bad row reads as no filters */ }
-  return c.json({ filters: Array.isArray(filters) ? filters : [] }, 200);
+  const name = viewName(body.name);
+  if (!name) return c.json({ error: "A view needs a name of up to 60 characters" }, 400);
+  const f = await viewFilters(entity, body.filters ?? []);
+  if ("error" in f) return c.json({ error: f.error }, 400);
+  const sort = typeof body.sort === "string" && VIEW_FIELD_KEY.test(body.sort) ? body.sort : null;
+  const order = body.order === "asc" || body.order === "desc" ? body.order : null;
+  await ensureDefaultView(entity);
+  const last = await get<{ p: number | null }>("SELECT MAX(position) as p FROM views WHERE entity_type = ?", [entity]);
+  const id = crypto.randomUUID();
+  await run(
+    "INSERT INTO views (id, entity_type, name, icon, is_default, position, filters, sort, sort_order) VALUES (?, ?, ?, 'table', 0, ?, ?, ?, ?)",
+    [id, entity, name, (last?.p ?? 0) + 1, f.json, sort, order],
+  );
+  if (typeof body.from === "string") {
+    await run(
+      `INSERT INTO view_fields (view_id, field_key, is_visible, size, aggregate)
+       SELECT ?, field_key, is_visible, size, aggregate FROM view_fields
+       WHERE view_id = (SELECT id FROM views WHERE id = ? AND entity_type = ?)`,
+      [id, body.from, entity],
+    );
+  }
+  const row = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
+  return c.json({ view: viewJson(row!) }, 201);
 });
 
-app.put("/api/list-views/:entity", async (c) => {
-  const entity = c.req.param("entity");
-  if (!isEntityType(entity)) return c.json({ error: "Invalid entity" }, 400);
-  const body = (await c.req.json().catch(() => ({}))) as { filters?: unknown };
-  if (!Array.isArray(body.filters)) return c.json({ error: "filters must be an array" }, 400);
-  const json = JSON.stringify(body.filters);
-  if (json.length > 20_000) return c.json({ error: "filters too large" }, 400);
-  // Compile once against the real columns, so a view can't be saved that the list would refuse.
-  try {
-    buildFilters(await tableColumns(ENTITY_TABLES[entity]), json);
-  } catch (err: unknown) {
-    return c.json({ error: (err as Error).message }, 400);
+// Renames a view, or updates its filters and sort (the "Update view" button).
+app.patch("/api/views/:id", async (c) => {
+  const id = c.req.param("id");
+  const prev = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
+  if (!prev) return c.json({ error: "View not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as { name?: unknown; filters?: unknown; sort?: unknown; order?: unknown };
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (body.name !== undefined) {
+    const name = viewName(body.name);
+    if (!name) return c.json({ error: "A view needs a name of up to 60 characters" }, 400);
+    sets.push("name = ?"); params.push(name);
   }
-  await run(
-    `INSERT INTO list_views (entity_type, filters, updated_at) VALUES (?, ?, datetime('now'))
-     ON CONFLICT(entity_type) DO UPDATE SET filters = excluded.filters, updated_at = excluded.updated_at`,
-    [entity, json],
-  );
-  return c.json({ filters: body.filters }, 200);
+  if (body.filters !== undefined) {
+    const f = await viewFilters(prev.entity_type as EntityType, body.filters);
+    if ("error" in f) return c.json({ error: f.error }, 400);
+    sets.push("filters = ?"); params.push(f.json);
+  }
+  if (body.sort !== undefined) {
+    sets.push("sort = ?"); params.push(typeof body.sort === "string" && VIEW_FIELD_KEY.test(body.sort) ? body.sort : null);
+  }
+  if (body.order !== undefined) {
+    sets.push("sort_order = ?"); params.push(body.order === "asc" || body.order === "desc" ? body.order : null);
+  }
+  if (sets.length) await run(`UPDATE views SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ?`, [...params, id]);
+  const row = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
+  return c.json({ view: viewJson(row!) }, 200);
+});
+
+// Deletes a view for everyone. The list's default view stays.
+app.delete("/api/views/:id", async (c) => {
+  const id = c.req.param("id");
+  const prev = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
+  if (!prev) return c.json({ error: "View not found" }, 404);
+  if (prev.is_default === 1) return c.json({ error: "The default view can't be deleted" }, 400);
+  await run("DELETE FROM view_fields WHERE view_id = ?", [id]);
+  await run("DELETE FROM views WHERE id = ?", [id]);
+  return c.json({ ok: true }, 200);
 });
 
 export default app;

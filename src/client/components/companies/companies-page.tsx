@@ -5,7 +5,8 @@ import { PageHeader, EntityIcon, CategoryBadge, EmptyState } from "@/components/
 import { CompanyDialog } from "@/components/companies/company-dialog";
 import { FilterBar } from "@/components/filter-bar";
 import { fieldsFromDefs, sanitize } from "@/lib/filters";
-import { useListFilters } from "@/hooks/use-list-filters";
+import { useListView } from "@/hooks/use-list-view";
+import { ViewSwitcher } from "@/components/view-switcher";
 import { withQuery } from "@/hooks/use-router";
 import { ImportDialog } from "@/components/import-dialog";
 import { RecordTable, columnKind, type NameColumn, type RecordColumn } from "@/components/record-table";
@@ -20,10 +21,9 @@ import type { Company } from "@/types";
 
 const dash = <span className="text-muted-foreground">—</span>;
 
-// `openId` and `filtersParam` as ContactsPage.
-export function CompaniesPage({ navigate, openId, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; filtersParam?: string }) {
-  const { companies, companiesPag, stats, setCompaniesPage, setCompaniesSort, setCompaniesSearch, setCompaniesFilters, deleteCompanies, customFields, setError } = useCrm();
-  const listFilters = useListFilters({ entity: "company", param: filtersParam, current: companiesPag.filters, apply: setCompaniesFilters, navigate });
+// `openId`, `viewParam` and `filtersParam` as ContactsPage.
+export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; viewParam?: string; filtersParam?: string }) {
+  const { companies, companiesPag, stats, setCompaniesPage, setCompaniesSort, setCompaniesSearch, setCompaniesFilters, setCompaniesView, deleteCompanies, customFields, setError } = useCrm();
   const companyFields = customFields.filter((d) => d.entity_type === "company");
   const filterFields = fieldsFromDefs(
     [
@@ -36,7 +36,8 @@ export function CompaniesPage({ navigate, openId, filtersParam }: { navigate: (t
     ],
     companyFields,
   );
-  const view = useTableView("company", undefined, { name: 220, domain: 180, industry: 160, contacts: 112 });
+  const view = useTableView("company", viewParam, { name: 220, domain: 180, industry: 160, contacts: 112 });
+  const listView = useListView({ entity: "company", table: view, filtersParam, pag: companiesPag, setFilters: setCompaniesFilters, setView: setCompaniesView, navigate });
 
   const name: NameColumn<Company> = {
     label: "Name",
@@ -179,17 +180,28 @@ export function CompaniesPage({ navigate, openId, filtersParam }: { navigate: (t
         )}
       </PageHeader>
       <FilterBar
+        leading={
+          <ViewSwitcher
+            views={listView.views}
+            current={listView.view}
+            count={companiesPag.total}
+            onOpen={listView.open}
+            onCreate={listView.create}
+            onRename={listView.rename}
+            onDelete={listView.remove}
+          />
+        }
         fields={filterFields}
-        filters={listFilters.filters}
-        onChange={listFilters.setFilters}
+        filters={listView.filters}
+        onChange={listView.setFilters}
         isVisible={view.visible}
-        dirty={listFilters.dirty}
-        onSave={listFilters.save}
-        onReset={listFilters.reset}
+        dirty={listView.dirty}
+        onSave={listView.update}
+        onReset={listView.reset}
       />
 
       {/* The first-run empty state is for an empty list, not a filtered one. */}
-      {companies.length === 0 && !companiesPag.search && sanitize(listFilters.filters).length === 0 ? (
+      {companies.length === 0 && !companiesPag.search && sanitize(listView.filters).length === 0 ? (
         <EmptyState title="No companies yet. Add your first." action={addButton} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">

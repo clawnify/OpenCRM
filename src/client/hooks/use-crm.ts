@@ -130,6 +130,9 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     setSort: (col: string) => setter((p) => ({ ...p, sort: col, order: p.sort === col && p.order === "asc" ? "desc" : "asc", page: 1 })),
     setSearch: (search: string) => setter((p) => ({ ...p, search, page: 1 })),
     setFilters: (filters: PaginatedState["filters"]) => setter((p) => ({ ...p, filters, page: 1 })),
+    // A view's filters and sort at once, so switching views fetches once.
+    setView: (v: { filters: PaginatedState["filters"]; sort: string; order: "asc" | "desc" }) =>
+      setter((p) => ({ ...p, filters: v.filters, sort: v.sort, order: v.order, page: 1 })),
   });
   const cSet = makeSetters(setContactsPag);
   const coSet = makeSetters(setCompaniesPag);
@@ -247,9 +250,9 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
 
   return {
     isAgent, stats,
-    contacts, contactsPag, setContactsPage: cSet.setPage, setContactsSort: cSet.setSort, setContactsSearch: cSet.setSearch, setContactsFilters: cSet.setFilters,
+    contacts, contactsPag, setContactsPage: cSet.setPage, setContactsSort: cSet.setSort, setContactsSearch: cSet.setSearch, setContactsFilters: cSet.setFilters, setContactsView: cSet.setView,
     addContact, updateContact, deleteContacts, fetchContact, fetchCompany,
-    companies, companiesPag, setCompaniesPage: coSet.setPage, setCompaniesSort: coSet.setSort, setCompaniesSearch: coSet.setSearch, setCompaniesFilters: coSet.setFilters,
+    companies, companiesPag, setCompaniesPage: coSet.setPage, setCompaniesSort: coSet.setSort, setCompaniesSearch: coSet.setSearch, setCompaniesFilters: coSet.setFilters, setCompaniesView: coSet.setView,
     addCompany, updateCompany, deleteCompanies,
     deals, dealsPag, dealsTotalValue, setDealsPage: dSet.setPage, setDealsSort: dSet.setSort, setDealsSearch: dSet.setSearch,
     addDeal, updateDeal, deleteDeal, boardDeals,

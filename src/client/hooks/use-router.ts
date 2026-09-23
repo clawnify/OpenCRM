@@ -3,12 +3,13 @@ import { useState, useEffect, useCallback } from "react";
 // A list route may carry `record`: the id open in the side panel beside the
 // table (`/contacts?record=<id>`). The record's own path (`/contacts/<id>`) is
 // the full page, so a deep link to a record still lands on the whole record.
-// `filters` opens a list pre-filtered (a filter tree, as the API takes it); the
-// list reads it once and drops it from the URL (see useListFilters).
+// `view` is the list's named view (absent: its default view). `filters` opens
+// a list pre-filtered (a filter tree, as the API takes it); the list reads it
+// once and drops it from the URL (see useListView).
 export type Route =
-  | { name: "contacts"; record?: string; filters?: string }
+  | { name: "contacts"; record?: string; view?: string; filters?: string }
   | { name: "contact"; id: string }
-  | { name: "companies"; record?: string; filters?: string }
+  | { name: "companies"; record?: string; view?: string; filters?: string }
   | { name: "company"; id: string }
   | { name: "deals" }
   | { name: "properties" }
@@ -18,10 +19,11 @@ function parse(pathname: string, search: string): Route {
   const q = new URLSearchParams(search);
   const record = q.get("record") || undefined;
   const filters = q.get("filters") ?? undefined;
-  if (pathname === "/" || pathname === "/contacts") return { name: "contacts", record, filters };
+  const view = q.get("view") || undefined;
+  if (pathname === "/" || pathname === "/contacts") return { name: "contacts", record, view, filters };
   const m = pathname.match(/^\/contacts\/([^/]+)$/);
   if (m) return { name: "contact", id: decodeURIComponent(m[1]) };
-  if (pathname === "/companies") return { name: "companies", record, filters };
+  if (pathname === "/companies") return { name: "companies", record, view, filters };
   const cm = pathname.match(/^\/companies\/([^/]+)$/);
   if (cm) return { name: "company", id: decodeURIComponent(cm[1]) };
   if (pathname === "/deals") return { name: "deals" };
