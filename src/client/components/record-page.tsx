@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
-import { Plus } from "lucide-react";
+import { Maximize2, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +20,35 @@ export function RecordTopBar({ onClose, crumb }: { onClose: () => void; crumb: s
         <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </Button>
       <span className="text-[0.8125rem] text-muted-foreground">{crumb}</span>
+    </header>
+  );
+}
+
+/**
+ * The side panel a list opens a record in, beside the table so the list stays
+ * in view. Full screen on a phone, where there is no room beside anything.
+ */
+export function RecordPanel({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <aside aria-label={label} className="fixed inset-0 z-40 flex flex-col bg-background md:static md:z-auto md:w-[26rem] md:shrink-0 md:border-l md:border-border">
+      {children}
+    </aside>
+  );
+}
+
+/** Panel top bar: the record type, then open-as-full-page and close. Same h-14 rule as the page header. */
+export function RecordPanelHeader({ icon: Icon, label, onExpand, onClose }: { icon: Icon; label: string; onExpand: () => void; onClose: () => void }) {
+  return (
+    <header className="flex h-14 shrink-0 items-center gap-1 border-b border-border pl-4 pr-3">
+      <span className="inline-flex flex-1 items-center gap-2 text-[0.8125rem] text-muted-foreground">
+        <Icon className="size-4" /> {label}
+      </span>
+      <Button variant="ghost" size="icon" onClick={onExpand} aria-label="Open as full page" title="Open as full page">
+        <Maximize2 className="size-4" />
+      </Button>
+      <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close panel" title="Close panel">
+        <X className="size-4" />
+      </Button>
     </header>
   );
 }

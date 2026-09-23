@@ -41,7 +41,7 @@ export function CategoryBadge({ value, className }: { value?: string | null; cla
   return (
     <span
       title={value}
-      className={cn("inline-block max-w-[12rem] truncate rounded-full px-2.5 py-1 align-middle text-xs font-medium capitalize", c.bg, c.text, className)}
+      className={cn("inline-block h-5 max-w-[12rem] truncate rounded-full px-2 align-middle text-[0.8125rem] font-medium leading-5 capitalize", c.bg, c.text, className)}
     >
       {value}
     </span>

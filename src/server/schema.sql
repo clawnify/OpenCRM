@@ -88,6 +88,21 @@ CREATE TABLE IF NOT EXISTS custom_field_defs (
   UNIQUE(entity_type, key)
 );
 
+-- The list tables' shared column layout, one row per (entity, column) that
+-- someone has changed: whether it shows, and its width. Everyone in the org
+-- sees the same layout (one view per list), and the same footer calculation
+-- per column. Columns without a row use the app's defaults. `field_key` is a
+-- built-in column id ('email', 'name') or a custom field's key.
+CREATE TABLE IF NOT EXISTS view_fields (
+  entity_type TEXT NOT NULL,                -- 'contact' | 'company'
+  field_key TEXT NOT NULL,
+  is_visible INTEGER NOT NULL DEFAULT 1,
+  size INTEGER,                             -- px; NULL = the app's default
+  aggregate TEXT,                           -- footer calculation (count, sum…); NULL = none
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (entity_type, field_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_id);
 CREATE INDEX IF NOT EXISTS idx_deals_contact ON deals(contact_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(status);

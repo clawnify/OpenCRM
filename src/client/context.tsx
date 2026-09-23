@@ -14,7 +14,7 @@ export interface CrmContextValue {
   setContactsFilters: (filters: PaginatedState["filters"]) => void;
   addContact: (data: Partial<Contact>) => Promise<void>;
   updateContact: (id: string, data: Partial<Contact>) => Promise<void>;
-  deleteContact: (id: string) => Promise<void>;
+  deleteContacts: (ids: string[]) => Promise<void>;
   fetchContact: (id: string) => Promise<Contact | null>;
   fetchCompany: (id: string) => Promise<Company | null>;
 
@@ -27,7 +27,7 @@ export interface CrmContextValue {
   setCompaniesFilters: (filters: PaginatedState["filters"]) => void;
   addCompany: (data: Partial<Company>) => Promise<void>;
   updateCompany: (id: string, data: Partial<Company>) => Promise<void>;
-  deleteCompany: (id: string) => Promise<void>;
+  deleteCompanies: (ids: string[]) => Promise<void>;
 
   // Deals
   deals: Deal[];
