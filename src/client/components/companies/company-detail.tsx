@@ -5,6 +5,7 @@ import { EntityIcon, CategoryBadge } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { InlineField } from "@/components/ui/inline-field";
 import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection } from "@/components/record-page";
+import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { cn } from "@/lib/utils";
 import type { Company, Activity } from "@/types";
 
@@ -18,7 +19,8 @@ function formatTimestamp(createdAt: string): string {
 // control; there is no edit mode. `panel` renders it in the side panel beside
 // the companies list, as ContactDetail does.
 export function CompanyDetail({ id, navigate, panel = false }: { id: string; navigate: (to: string) => void; panel?: boolean }) {
-  const { fetchCompany, updateCompany, fetchActivities, setError } = useCrm();
+  const { fetchCompany, updateCompany, fetchActivities, setError, customFields } = useCrm();
+  const relationDefs = customFields.filter((d) => d.entity_type === "company" && d.field_type === "relation");
   const [company, setCompany] = useState<Company | null | undefined>(undefined);
   const [activities, setActivities] = useState<Activity[]>([]);
 
@@ -26,11 +28,14 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
     if (!company) return;
     try {
       await updateCompany(company.id, patch);
-      const fresh = await fetchCompany(company.id);
-      if (fresh) setCompany(fresh);
+      await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save");
     }
+  };
+  const reload = async () => {
+    const fresh = await fetchCompany(id);
+    if (fresh) setCompany(fresh);
   };
 
   useEffect(() => {
@@ -102,9 +107,12 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
               <Attr icon={StickyNote} label="Description">
                 <InlineField value={company.notes} placeholder="Set description…" onSave={(v) => saveField({ notes: v })} />
               </Attr>
+              <RelationAttrs defs={relationDefs} row={company} onSave={(key, v) => saveField({ [key]: v } as Partial<Company>)} />
             </dl>
             <button type="button" className="mt-1 h-8 text-[0.8125rem] text-muted-foreground hover:text-foreground">View all values</button>
           </DetailsSection>
+
+          <RelationSections defs={relationDefs} row={company} onChanged={reload} />
 
           <DetailsSection title="Lists" action={<button type="button" className="hover:text-foreground">Add to list</button>}>
             <p className="py-1 text-sm text-faint">This record has not been added to any lists</p>

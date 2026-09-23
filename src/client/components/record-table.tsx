@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, Plus, Settings2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import type { TableView } from "@/hooks/use-table-view";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,15 @@ export function columnKind(fieldType: string): ColumnKind {
   return "text";
 }
 
+/**
+ * How a cell edits in place: click the value (no pencil). "text" puts an input
+ * over the cell, saved on Enter or a click away and dropped on Escape; "menu"
+ * opens a list under the cell (a status, a linked record), given `close`.
+ */
+export type CellEdit<T> =
+  | { type: "text"; value: (row: T) => string; save: (row: T, value: string) => Promise<void>; input?: "text" | "email" | "tel" | "number" | "date" }
+  | { type: "menu"; render: (row: T, close: () => void) => ReactNode };
+
 /** A column the viewer can show, hide and resize. `key` is its id in the saved view. */
 export interface RecordColumn<T> {
   key: string;
@@ -26,6 +35,12 @@ export interface RecordColumn<T> {
   /** Server sort key; omit for a column that can't be sorted. */
   sort?: string;
   align?: "right";
+  /** False for a column with nothing for the footer to calculate on (no column of its own). */
+  calculate?: boolean;
+  /** Edits the value in the cell; without it a click on the cell opens the record. */
+  edit?: CellEdit<T>;
+  /** The value a hover "copy" button copies (an email, a phone number). */
+  copy?: (row: T) => string;
   render: (row: T) => ReactNode;
   /** The value as plain text, for CSV export. */
   text: (row: T) => string;
@@ -86,6 +101,8 @@ export function RecordTable<T extends { id: string }>({
   onAdd: () => void;
 }) {
   const shown = columns.filter((c) => view.visible(c.key));
+  // The cell being edited, as "rowId:columnKey".
+  const [editing, setEditing] = useState<string | null>(null);
   const allChecked = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const someChecked = !allChecked && rows.some((r) => selected.has(r.id));
 
@@ -172,7 +189,17 @@ export function RecordTable<T extends { id: string }>({
                   </a>
                 </span>
               </TableCell>
-              {shown.map((c) => (
+              {shown.map((c) => c.edit ? (
+                <EditableCell
+                  key={c.key}
+                  column={c}
+                  edit={c.edit}
+                  row={row}
+                  editing={editing === `${row.id}:${c.key}`}
+                  onEdit={() => setEditing(`${row.id}:${c.key}`)}
+                  onDone={() => setEditing(null)}
+                />
+              ) : (
                 <TableCell key={c.key} className={cn(c.align === "right" && "text-right")}>{c.render(row)}</TableCell>
               ))}
               <TableCell className="shadow-none" />
@@ -199,13 +226,112 @@ export function RecordTable<T extends { id: string }>({
           </TableCell>
           {shown.map((c) => (
             <TableCell key={c.key} className={cn(footCell, c.align === "right" && "text-right")}>
-              <AggregatePicker label={c.label} kind={c.kind ?? "text"} op={view.aggregate(c.key)} value={totals[c.key]} onChange={(op) => view.setAggregate(c.key, op)} />
+              {c.calculate !== false && <AggregatePicker label={c.label} kind={c.kind ?? "text"} op={view.aggregate(c.key)} value={totals[c.key]} onChange={(op) => view.setAggregate(c.key, op)} />}
             </TableCell>
           ))}
           <TableCell colSpan={2} className={footCell} />
         </TableRow>
       </tfoot>
     </Table>
+  );
+}
+
+/** A cell whose value edits in place. Hover outlines it; click or Enter edits. */
+function EditableCell<T extends { id: string }>({ column, edit, row, editing, onEdit, onDone }: {
+  column: RecordColumn<T>;
+  edit: CellEdit<T>;
+  row: T;
+  editing: boolean;
+  onEdit: () => void;
+  onDone: () => void;
+}) {
+  const cell = useRef<HTMLTableCellElement>(null);
+  // Escape drops a text edit; any other way out (Enter, a click away) keeps it.
+  const cancelled = useRef(false);
+  const size = editing && cell.current ? { w: cell.current.offsetWidth, h: cell.current.offsetHeight } : null;
+  const open = () => { cancelled.current = false; onEdit(); };
+  return (
+    <Popover open={editing} onOpenChange={(o) => { if (!o) onDone(); }}>
+      <PopoverAnchor asChild>
+        <TableCell
+          ref={cell}
+          tabIndex={0}
+          onClick={(e) => { e.stopPropagation(); open(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) { e.preventDefault(); open(); } }}
+          className={cn(
+            column.align === "right" && "text-right",
+            "group/cell relative cursor-pointer outline-none hover:shadow-[inset_0_0_0_1px_var(--border)] focus-visible:shadow-[inset_0_0_0_1px_var(--ring)]",
+          )}
+        >
+          {column.render(row)}
+          {column.copy?.(row) && <CopyButton value={column.copy(row)} />}
+        </TableCell>
+      </PopoverAnchor>
+      <PopoverContent
+        align="start"
+        // A text editor sits on the cell itself; a list opens just under it.
+        sideOffset={edit.type === "text" ? -(size?.h ?? 32) : 2}
+        style={{ minWidth: size?.w, width: edit.type === "menu" ? Math.max(size?.w ?? 0, 256) : undefined }}
+        onClick={(e) => e.stopPropagation()}
+        onEscapeKeyDown={() => { cancelled.current = true; }}
+      >
+        {edit.type === "text"
+          ? <TextCellEditor initial={edit.value(row)} input={edit.input} height={size?.h} cancelled={cancelled} onSave={(v) => edit.save(row, v)} onDone={onDone} />
+          : edit.render(row, onDone)}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Copies a cell's value; shown on the cell's hover, always for an agent. */
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "Copied" : `Copy ${value}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        });
+      }}
+      className="absolute right-1 top-1/2 inline-flex h-6 -translate-y-1/2 items-center gap-1 rounded-sm bg-card px-1.5 text-xs text-muted-foreground opacity-0 shadow-raised hover:text-foreground focus-visible:opacity-100 group-hover/cell:opacity-100 [[data-agent]_&]:opacity-100"
+    >
+      <Copy className="size-3.5" />
+      {copied && "Copied"}
+    </button>
+  );
+}
+
+/** The input over a text cell. Saves when it goes away, unless Escape sent it. */
+function TextCellEditor({ initial, input = "text", height, cancelled, onSave, onDone }: {
+  initial: string;
+  input?: "text" | "email" | "tel" | "number" | "date";
+  height?: number;
+  cancelled: { current: boolean };
+  onSave: (value: string) => Promise<void>;
+  onDone: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const latest = useRef(value);
+  latest.current = value;
+  useEffect(() => () => {
+    const next = latest.current.trim();
+    if (!cancelled.current && next !== initial.trim()) void onSave(next);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <input
+      autoFocus
+      type={input}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onFocus={(e) => { if (input !== "date" && input !== "number") e.currentTarget.select(); }}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onDone(); } }}
+      style={{ height }}
+      className="w-full rounded-md bg-card px-3 text-[0.8125rem] outline-none"
+    />
   );
 }
 

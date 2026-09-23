@@ -83,6 +83,13 @@ CREATE TABLE IF NOT EXISTS custom_field_defs (
   custom_field TEXT DEFAULT '',             -- widget registry uid (e.g. clawnify::score.score)
   options TEXT NOT NULL DEFAULT '{}',        -- JSON: widget config (score min/max, badge enum, colors)
   position INTEGER NOT NULL DEFAULT 0,
+  -- A relation (field_type 'relation') is two defs, one per side, pointing at
+  -- each other through inverse_def_id. Only the many_to_one side has a column:
+  -- `key` holds the linked record's id (e.g. contacts.partner_id). The
+  -- one_to_many side is read from that column and has none of its own.
+  relation_type TEXT,                       -- 'many_to_one' | 'one_to_many'; NULL for other types
+  target_entity TEXT,                       -- the entity on the other side
+  inverse_def_id TEXT,                      -- the other side's def
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
   UNIQUE(entity_type, key)

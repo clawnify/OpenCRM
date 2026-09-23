@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { InlineField } from "@/components/ui/inline-field";
 import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection } from "@/components/record-page";
+import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -46,7 +47,8 @@ function formatTimestamp(createdAt: string): string {
 // `panel` is the same record in the side panel beside the contacts list: one
 // column, no tab strip, and no highlight tiles repeating the details above them.
 export function ContactDetail({ id, navigate, panel = false }: { id: string; navigate: (to: string) => void; panel?: boolean }) {
-  const { fetchContact, fetchActivities, updateContact, emailContact, scheduleMeeting, addNote, connections, setError } = useCrm();
+  const { fetchContact, fetchActivities, updateContact, emailContact, scheduleMeeting, addNote, connections, setError, customFields } = useCrm();
+  const relationDefs = customFields.filter((d) => d.entity_type === "contact" && d.field_type === "relation");
 
   const [contact, setContact] = useState<Contact | null | undefined>(undefined);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -67,11 +69,14 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
     if (!contact) return;
     try {
       await updateContact(contact.id, patch);
-      const fresh = await fetchContact(contact.id);
-      if (fresh) setContact(fresh);
+      await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save");
     }
+  };
+  const reload = async () => {
+    const fresh = await fetchContact(id);
+    if (fresh) setContact(fresh);
   };
 
   useEffect(() => {
@@ -266,9 +271,12 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
                 <InlineField value={contact.title} placeholder="Set job title…" onSave={(v) => saveField({ title: v })} />
               </Attr>
               <Attr icon={Clock} label="Status"><span className="px-2"><CategoryBadge value={contact.status} /></span></Attr>
+              <RelationAttrs defs={relationDefs} row={contact} onSave={(key, v) => saveField({ [key]: v } as Partial<Contact>)} />
             </dl>
             <button type="button" className="mt-1 h-8 text-[0.8125rem] text-muted-foreground hover:text-foreground">View all values</button>
           </DetailsSection>
+
+          <RelationSections defs={relationDefs} row={contact} onChanged={reload} />
 
           <DetailsSection title="Lists" action={<button type="button" className="hover:text-foreground">Add to list</button>}>
             <p className="py-1 text-sm text-faint">This record has not been added to any lists</p>

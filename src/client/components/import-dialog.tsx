@@ -92,7 +92,8 @@ export function ImportDialog({
 }) {
   const { importEntity, setError, customFields } = useCrm();
   const entityDefs = useMemo(
-    () => customFields.filter((d) => d.entity_type === config.entity),
+    // Relations aren't imported: a cell holds a name, not the linked record's id.
+    () => customFields.filter((d) => d.entity_type === config.entity && d.field_type !== "relation"),
     [customFields, config.entity],
   );
 

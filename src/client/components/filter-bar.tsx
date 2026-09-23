@@ -8,7 +8,9 @@ import {
   OPERATORS, isGroup, needsValue, newRule, isComplete, describeRule, parseRelative, formatRelative,
   type FieldType, type FilterField, type FilterGroup, type FilterNode, type FilterRule, type Direction, type Unit,
 } from "@/lib/filters";
+import { RecordPicker, useRecordNames } from "@/lib/relations";
 import { cn } from "@/lib/utils";
+import type { EntityType, RelationRecord } from "@/types";
 
 // Which popover is open: the "+ Filter" menu, a basic rule's chip, or the advanced editor.
 type Open = { kind: "add"; editing?: number } | { kind: "rule"; index: number } | { kind: "advanced" } | null;
@@ -21,7 +23,7 @@ const chip = "inline-flex h-7 items-center gap-1 rounded-sm bg-card pl-2 pr-1 te
  * while the list differs from its view. Editing applies at once; a rule still
  * being typed is left out of the query until it has a value.
  */
-export function FilterBar({ leading, fields, filters, onChange, isVisible, dirty, onSave, onReset }: {
+export function FilterBar({ leading, fields: baseFields, filters, onChange, isVisible, dirty, onSave, onReset }: {
   leading?: ReactNode;
   fields: FilterField[];
   filters: FilterNode[];
@@ -32,6 +34,10 @@ export function FilterBar({ leading, fields, filters, onChange, isVisible, dirty
   onSave: () => void;
   onReset: () => void;
 }) {
+  // Relation rules hold record ids; their chips and lists show the records' names.
+  const name = useRecordNames(relationValues(baseFields, filters));
+  const fields = baseFields.map((f): FilterField =>
+    f.type === "relation" && f.entity ? { ...f, labelOf: (v) => recordLabel(name(f.entity!, v)) } : f);
   const [open, setOpen] = useState<Open>(null);
   // Set while the "+ Filter" menu hands over to the advanced editor, so the
   // menu doesn't pull focus back to its button and close the editor.
@@ -68,7 +74,6 @@ export function FilterBar({ leading, fields, filters, onChange, isVisible, dirty
     setTimeout(() => setOpen({ kind: "advanced" }), 0);
   };
 
-  const hasAny = filters.length > 0;
   // The rule the "+ Filter" menu is editing after a field was picked, if any.
   const addEditing = open?.kind === "add" && open.editing !== undefined ? filters[open.editing] : undefined;
   const addRule = addEditing && !isGroup(addEditing) ? addEditing : undefined;
@@ -76,7 +81,8 @@ export function FilterBar({ leading, fields, filters, onChange, isVisible, dirty
 
   return (
     <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-6 py-1.5">
-      {leading && <>{leading}<span className="mx-1 h-4 w-px bg-border" aria-hidden="true" /></>}
+      {leading}
+      {leading && filters.length > 0 && <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />}
       {filters.map((n, i) => {
         if (isGroup(n)) return null;
         const field = fieldOf(n.field);
@@ -118,43 +124,45 @@ export function FilterBar({ leading, fields, filters, onChange, isVisible, dirty
         </Popover>
       )}
 
-      <Popover open={open?.kind === "add"} onOpenChange={onOpenChange({ kind: "add" })}>
-        <PopoverTrigger asChild>
-          <Button size="sm" variant="ghost">
-            {hasAny ? <Plus className="size-4" /> : <FilterIcon className="size-4" />}
-            {hasAny ? "Add filter" : "Filter"}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          className="w-72"
-          onCloseAutoFocus={(e) => { if (handoff.current) { e.preventDefault(); handoff.current = false; } }}
-        >
-          {open?.kind === "add" && open.editing !== undefined && addRule && addField ? (
-            <RuleEditor
-              field={addField}
-              rule={addRule}
-              onChange={(r) => replace(open.editing!, r)}
-              onBack={() => { close(); setOpen({ kind: "add" }); }}
-            />
-          ) : (
-            <FieldList fields={fields} isVisible={isVisible} onPick={pickField} footer={
-              <CommandGroup forceMount className="border-t border-border">
-                <CommandItem forceMount value="Advanced filter" onSelect={openAdvanced}>
-                  <ListFilter className="size-3.5 text-muted-foreground" /> Advanced filter
-                </CommandItem>
-              </CommandGroup>
-            } />
-          )}
-        </PopoverContent>
-      </Popover>
-
-      {dirty && (
-        <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={onReset}>Reset</Button>
-          <Button size="sm" variant="secondary" onClick={onSave}>Update view</Button>
-        </div>
-      )}
+      {/* Right end: Reset / Update view while the list differs from its view, then Filter. */}
+      <div className="ml-auto flex items-center gap-2">
+        {dirty && (
+          <>
+            <Button size="sm" variant="ghost" onClick={onReset}>Reset</Button>
+            <Button size="sm" variant="secondary" onClick={onSave}>Update view</Button>
+          </>
+        )}
+        <Popover open={open?.kind === "add"} onOpenChange={onOpenChange({ kind: "add" })}>
+          <PopoverTrigger asChild>
+            <Button size="sm" variant="ghost">
+              <FilterIcon className="size-4" />
+              Filter
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            className="w-72"
+            onCloseAutoFocus={(e) => { if (handoff.current) { e.preventDefault(); handoff.current = false; } }}
+          >
+            {open?.kind === "add" && open.editing !== undefined && addRule && addField ? (
+              <RuleEditor
+                field={addField}
+                rule={addRule}
+                onChange={(r) => replace(open.editing!, r)}
+                onBack={() => { close(); setOpen({ kind: "add" }); }}
+              />
+            ) : (
+              <FieldList fields={fields} isVisible={isVisible} onPick={pickField} footer={
+                <CommandGroup forceMount className="border-t border-border">
+                  <CommandItem forceMount value="Advanced filter" onSelect={openAdvanced}>
+                    <ListFilter className="size-3.5 text-muted-foreground" /> Advanced filter
+                  </CommandItem>
+                </CommandGroup>
+              } />
+            )}
+          </PopoverContent>
+        </Popover>
+      </div>
     </div>
   );
 }
@@ -190,6 +198,17 @@ function FieldList({ fields, isVisible, onPick, footer }: {
 }
 
 /** One rule, as a chip's popover: the field, its operator, then the value. */
+/** Every record id a relation rule in the tree holds, with its entity. */
+function relationValues(fields: FilterField[], nodes: FilterNode[]): Array<{ entity: EntityType; id: string }> {
+  return nodes.flatMap((n) => {
+    if (isGroup(n)) return relationValues(fields, n.rules);
+    const entity = fields.find((f) => f.key === n.field && f.type === "relation")?.entity;
+    return entity && Array.isArray(n.value) ? n.value.map((id) => ({ entity, id })) : [];
+  });
+}
+
+const recordLabel = (r: RelationRecord | null | undefined) => (r ? r.label || "Untitled" : r === null ? "Deleted record" : "…");
+
 function RuleEditor({ field, rule, onChange, onBack }: {
   field: FilterField;
   rule: FilterRule;
@@ -224,7 +243,7 @@ function withOp(field: FilterField, rule: FilterRule, op: string): FilterRule {
     const day = typeof rule.value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rule.value) ? rule.value : todayISO();
     return { field: rule.field, op, value: day };
   }
-  if (field.type === "enum") return { field: rule.field, op, value: Array.isArray(rule.value) ? rule.value : [] };
+  if (field.type === "enum" || field.type === "relation") return { field: rule.field, op, value: Array.isArray(rule.value) ? rule.value : [] };
   return { ...rule, op, value: rule.value ?? "" };
 }
 
@@ -312,6 +331,20 @@ function ValueInput({ field, rule, onChange, autoFocus = false, inline = false }
     if (!inline) return <div className="-mx-2 border-t border-border pt-1">{list}</div>;
     const label = selected.map((v) => field.options?.find((o) => o.value === v)?.label ?? v).join(", ") || "Select…";
     return <InlineList label={label}>{list}</InlineList>;
+  }
+
+  if (field.type === "relation" && field.entity) {
+    const selected = Array.isArray(rule.value) ? rule.value : [];
+    const picker = (
+      <RecordPicker
+        entity={field.entity}
+        selected={selected}
+        placeholder={`Search ${field.label.toLowerCase()}…`}
+        onPick={(r) => onChange({ ...rule, value: selected.includes(r.id) ? selected.filter((x) => x !== r.id) : [...selected, r.id] })}
+      />
+    );
+    if (!inline) return <div className="-mx-2 border-t border-border">{picker}</div>;
+    return <InlineList label={selected.map((v) => field.labelOf?.(v) ?? v).join(", ") || "Select…"}>{picker}</InlineList>;
   }
 
   if (field.type === "date") {

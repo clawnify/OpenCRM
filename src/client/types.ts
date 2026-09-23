@@ -13,9 +13,26 @@ export type AttributeType =
   | "date"
   | "datetime"
   | "enumeration"
-  | "json";
+  | "json"
+  | "relation";
 
-/** A user-defined field on an entity type. Maps to a real column on the table. */
+/** A relation's side: many_to_one holds one linked record's id in its own
+ *  column; one_to_many lists the records whose many_to_one points back here. */
+export type RelationType = "many_to_one" | "one_to_many";
+
+/** A linked record as a chip shows it. `domain` is a company's, for its logo. */
+export interface RelationRecord {
+  id: string;
+  label: string;
+  domain: string | null;
+}
+
+/** A relation's value on a read row (`row.relations[key]`): the linked record,
+ *  or for a one_to_many side the first few and how many there are. */
+export type RelationValue = RelationRecord | null | { items: RelationRecord[]; total: number };
+
+/** A user-defined field on an entity type. Maps to a real column on the table,
+ *  except a relation's one_to_many side, which is read from the other side. */
 export interface CustomFieldDef {
   id: string;
   entity_type: EntityType;
@@ -25,6 +42,9 @@ export interface CustomFieldDef {
   custom_field: string; // widget registry uid, or "" for a bare base type
   options: Record<string, unknown>;
   position: number;
+  relation_type: RelationType | null;
+  target_entity: EntityType | null;
+  inverse_def_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -39,6 +59,7 @@ export interface Company {
   notes: string;
   contact_count?: number;
   custom?: Record<string, unknown>; // write payload; on reads, values are flat columns
+  relations?: Record<string, RelationValue>; // reads only, keyed by relation field
   created_at: string;
   updated_at: string;
 }
@@ -55,6 +76,7 @@ export interface Contact {
   company_name?: string | null;
   company_domain?: string | null;
   custom?: Record<string, unknown>; // write payload; on reads, values are flat columns
+  relations?: Record<string, RelationValue>; // reads only, keyed by relation field
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +94,7 @@ export interface Deal {
   company_name?: string | null;
   company_domain?: string | null;
   custom?: Record<string, unknown>; // write payload; on reads, values are flat columns
+  relations?: Record<string, RelationValue>; // reads only, keyed by relation field
   created_at: string;
   updated_at: string;
 }

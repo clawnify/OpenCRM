@@ -21,13 +21,28 @@ import {
   updateCustomField,
   deleteCustomField,
 } from "@/lib/custom-fields";
-import type { AttributeType, CustomFieldDef, EntityType } from "@/types";
+import type { AttributeType, CustomFieldDef, EntityType, RelationType } from "@/types";
 
 const ENTITIES: { key: EntityType; label: string }[] = [
   { key: "contact", label: "Contacts" },
   { key: "company", label: "Companies" },
   { key: "deal", label: "Deals" },
 ];
+
+// A record of each entity, one and many: "Each contact has one company".
+const NOUN: Record<EntityType, { one: string; many: string }> = {
+  contact: { one: "contact", many: "contacts" },
+  company: { one: "company", many: "companies" },
+  deal: { one: "deal", many: "deals" },
+};
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** A relation's shape as the attributes table says it: "One company", "Many contacts". */
+function relationSummary(def: CustomFieldDef): string {
+  if (!def.target_entity) return "";
+  const n = NOUN[def.target_entity];
+  return def.relation_type === "many_to_one" ? `One ${n.one}` : `Many ${n.many}`;
+}
 
 // Combined type picker: bare base types + custom widgets, each with a stable id.
 const TYPE_OPTIONS = [
@@ -139,6 +154,8 @@ function EntityAttributes({
   // flight; null = trust the server order (defs arrive sorted by position).
   const [localOrder, setLocalOrder] = useState<string[] | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomFieldDef | null>(null);
+  const { customFields } = useCrm();
+  const deleteInverse = deleteTarget?.inverse_def_id ? customFields.find((d) => d.id === deleteTarget.inverse_def_id) : undefined;
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   // A destructive action confirms in a dialog that names the object, never window.confirm.
@@ -252,7 +269,11 @@ function EntityAttributes({
             <DialogHeader>
               <DialogTitle>Delete "{deleteTarget.label}"?</DialogTitle>
             </DialogHeader>
-            <p className="text-sm text-muted-foreground">This removes the column and its values for every {entity}. It cannot be undone.</p>
+            <p className="text-sm text-muted-foreground">
+              {deleteTarget.field_type === "relation"
+                ? <>This removes the relation from both sides{deleteInverse && <> ({deleteTarget.label} here, {deleteInverse.label} on {NOUN[deleteInverse.entity_type].many})</>} and every link it holds. The records stay. It cannot be undone.</>
+                : <>This removes the column and its values for every {entity}. It cannot be undone.</>}
+            </p>
             <DialogFooter>
               <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
               <Button variant="destructive" onClick={confirmRemove}>Delete attribute</Button>
@@ -301,7 +322,7 @@ function SortableAttrRow({ def, canDrag, onEdit, onRemove }: { def: CustomFieldD
       </TableCell>
       <TableCell className="text-muted-foreground">{typeLabel}</TableCell>
       <TableCell className="text-muted-foreground">{def.options.required === true ? "Required" : ""}</TableCell>
-      <TableCell />
+      <TableCell className="text-muted-foreground">{def.field_type === "relation" ? relationSummary(def) : ""}</TableCell>
       <TableCell>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -406,11 +427,13 @@ function EditAttribute({
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)}
-              className="size-4 rounded border-input" />
-            Required — records can't be created without a value
-          </label>
+          {def.field_type !== "relation" && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)}
+                className="size-4 rounded border-input" />
+              Required — records can't be created without a value
+            </label>
+          )}
 
           <DialogFooter>
             <DialogClose asChild>
@@ -447,10 +470,19 @@ function AddAttribute({
   const [min, setMin] = useState("0");
   const [max, setMax] = useState("100");
   const [required, setRequired] = useState(false);
+  const [target, setTarget] = useState<EntityType>(entity === "company" ? "contact" : "company");
+  const [relationType, setRelationType] = useState<RelationType>("many_to_one");
+  const [inverseLabel, setInverseLabel] = useState("");
   const [busy, setBusy] = useState(false);
 
   const selected = TYPE_OPTIONS.find((t) => t.id === typeId)!;
-  const key = slugify(label);
+  const isRelation = selected.field_type === "relation";
+  // A relation's many_to_one side names a column of ids, so its key ends in _id.
+  const key = slugify(label) && (isRelation && relationType === "many_to_one" ? `${slugify(label)}_id` : slugify(label));
+  // The other side, on the target: many records point back ("Partner contacts"), or one does ("Company").
+  const inverseDefault = relationType === "many_to_one" ? capitalize(NOUN[entity].many) : capitalize(NOUN[entity].one);
+  const inverseName = inverseLabel.trim() || inverseDefault;
+  const inverseKey = relationType === "one_to_many" ? `${slugify(inverseName)}_id` : slugify(inverseName);
   const isEnum = selected.field_type === "enumeration";
   const isScore = selected.uid === "clawnify::score.score";
   const dupKey = existingKeys.includes(key);
@@ -461,7 +493,7 @@ function AddAttribute({
     const options: Record<string, unknown> = {};
     if (isEnum) options.enum = enumText.split("\n").map((s) => s.trim()).filter(Boolean);
     if (isScore) { options.min = Number(min) || 0; options.max = Number(max) || 100; }
-    if (required) options.required = true;
+    if (required && !isRelation) options.required = true;
     setBusy(true);
     try {
       await createCustomField({
@@ -472,8 +504,9 @@ function AddAttribute({
         custom_field: selected.uid,
         options,
         position: existingKeys.length, // append after existing attributes
+        ...(isRelation && { relation_type: relationType, target_entity: target, inverse_key: inverseKey, inverse_label: inverseName }),
       });
-      setLabel(""); setEnumText(""); setTypeId(TYPE_OPTIONS[0].id); setRequired(false);
+      setLabel(""); setEnumText(""); setTypeId(TYPE_OPTIONS[0].id); setRequired(false); setInverseLabel("");
       await onChanged();
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to create attribute");
@@ -514,6 +547,37 @@ function AddAttribute({
             className="min-h-[80px] rounded-sm bg-card px-2 py-1.5 font-mono text-sm shadow-edge" />
         </div>
       )}
+      {isRelation && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label>Linked to</Label>
+            <Select value={target} onValueChange={(v) => { if (v in NOUN) setTarget(v as EntityType); }}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {ENTITIES.map((e) => <SelectItem key={e.key} value={e.key}>{e.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Each {NOUN[entity].one} has</Label>
+            <Select value={relationType} onValueChange={(v) => { if (v === "many_to_one" || v === "one_to_many") setRelationType(v); }}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="many_to_one">One {NOUN[target].one}</SelectItem>
+                <SelectItem value="one_to_many">Many {NOUN[target].many}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="col-span-2 flex flex-col gap-1.5">
+            <Label htmlFor="prop-inverse">Label on {NOUN[target].many}</Label>
+            <Input id="prop-inverse" value={inverseLabel} placeholder={inverseDefault} onChange={(e) => setInverseLabel(e.target.value)} />
+            <span className="text-xs text-muted-foreground">
+              Each {NOUN[target].one} shows {relationType === "many_to_one" ? `its ${NOUN[entity].many}` : `its ${NOUN[entity].one}`} under this name.
+              {inverseKey && <span className="font-mono"> {inverseKey}</span>}
+            </span>
+          </div>
+        </div>
+      )}
       {isScore && (
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5"><Label htmlFor="prop-min">Min</Label>
@@ -523,13 +587,15 @@ function AddAttribute({
         </div>
       )}
 
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)}
-          className="size-4 rounded border-input" />
-        Required — records can't be created without a value
-      </label>
+      {!isRelation && (
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)}
+            className="size-4 rounded border-input" />
+          Required — records can't be created without a value
+        </label>
+      )}
 
-      <Button type="submit" size="sm" disabled={busy || !label.trim() || !key || dupKey} className="gap-1.5">
+      <Button type="submit" size="sm" disabled={busy || !label.trim() || !key || dupKey || (isRelation && !inverseKey)} className="gap-1.5">
         <Plus className="size-3.5" /> {busy ? "Adding…" : "Add attribute"}
       </Button>
     </form>

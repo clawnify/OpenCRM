@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { CustomFieldDisplay, readCustom } from "@/lib/custom-fields";
+import { relationColumn } from "@/lib/relations";
+import { customFieldCopy, customFieldEdit, optionEdit, recordEdit, textEdit } from "@/components/cell-editors";
 import { useTableView, useAggregates, listFilterQuery } from "@/hooks/use-table-view";
 import { downloadCsv } from "@/lib/csv";
 import type { Contact } from "@/types";
@@ -28,7 +30,7 @@ const fullName = (c: Contact) => `${c.first_name} ${c.last_name}`.trim();
 // `viewParam` is the named view to show (absent: the default); `filtersParam`
 // a link's `?filters=`, read once (see useListView).
 export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; viewParam?: string; filtersParam?: string }) {
-  const { contacts, contactsPag, stats, setContactsPage, setContactsSort, setContactsSearch, setContactsFilters, setContactsView, deleteContacts, customFields, setError } = useCrm();
+  const { contacts, contactsPag, stats, setContactsPage, setContactsSort, setContactsSearch, setContactsFilters, setContactsView, deleteContacts, updateContact, customFields, setError } = useCrm();
   const contactFields = customFields.filter((d) => d.entity_type === "contact");
   const filterFields = fieldsFromDefs(
     [
@@ -57,24 +59,36 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
       </>
     ),
   };
+  // A cell edited in place saves its one field; the list refetches.
+  const saveCell = async (c: Contact, patch: Record<string, unknown>) => {
+    try {
+      await updateContact(c.id, patch as Partial<Contact>);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save");
+    }
+  };
   const columns: RecordColumn<Contact>[] = [
     {
-      key: "email", label: "Email", sort: "email", text: (c) => c.email,
+      key: "email", label: "Email", sort: "email", text: (c) => c.email, edit: textEdit("email", saveCell, { input: "email" }), copy: (c) => c.email,
       render: (c) => c.email
         ? <a href={`mailto:${c.email}`} onClick={(e) => e.stopPropagation()} className="text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground">{c.email}</a>
         : dash,
     },
-    { key: "phone", label: "Phone", sort: "phone", text: (c) => c.phone, render: (c) => c.phone ? <span className="tabular">{c.phone}</span> : dash },
+    { key: "phone", label: "Phone", sort: "phone", text: (c) => c.phone, edit: textEdit("phone", saveCell, { input: "tel" }), copy: (c) => c.phone, render: (c) => c.phone ? <span className="tabular">{c.phone}</span> : dash },
     {
-      key: "company", label: "Company", text: (c) => c.company_name ?? "",
+      key: "company", label: "Company", sort: "company_id", text: (c) => c.company_name ?? "", edit: recordEdit("company_id", "company", "Company", saveCell),
       render: (c) => c.company_name
         ? <span className="flex min-w-0 items-center gap-2"><EntityIcon name={c.company_name} domain={c.company_domain} className="size-5" /><span className="truncate">{c.company_name}</span></span>
         : dash,
     },
-    { key: "title", label: "Title", sort: "title", text: (c) => c.title, render: (c) => c.title || dash },
-    { key: "status", label: "Status", sort: "status", text: (c) => c.status, render: (c) => <CategoryBadge value={c.status} /> },
-    ...contactFields.map((def): RecordColumn<Contact> => ({
-      key: def.key, label: def.label, sort: def.key, kind: columnKind(def.field_type),
+    { key: "title", label: "Title", sort: "title", text: (c) => c.title, edit: textEdit("title", saveCell), render: (c) => c.title || dash },
+    {
+      key: "status", label: "Status", sort: "status", text: (c) => c.status,
+      edit: optionEdit("status", STATUSES.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })), saveCell),
+      render: (c) => <CategoryBadge value={c.status} />,
+    },
+    ...contactFields.map((def): RecordColumn<Contact> => def.field_type === "relation" ? { ...relationColumn<Contact>(def), edit: customFieldEdit(def, saveCell) } : ({
+      key: def.key, label: def.label, sort: def.key, kind: columnKind(def.field_type), edit: customFieldEdit(def, saveCell), copy: customFieldCopy(def),
       text: (c) => String(readCustom(c, def.key) ?? ""),
       render: (c) => <CustomFieldDisplay def={def} value={readCustom(c, def.key)} />,
     })),

@@ -4,7 +4,9 @@
 // advanced filter is the one top-level group ("N advanced rules"), whose rules
 // combine with AND or OR and which may hold one more level of groups.
 
-export type FieldType = "text" | "number" | "enum" | "date" | "boolean";
+import type { EntityType } from "@/types";
+
+export type FieldType = "text" | "number" | "enum" | "date" | "boolean" | "relation";
 
 export interface FilterField {
   /** The real column the rule filters on. */
@@ -14,6 +16,10 @@ export interface FilterField {
   options?: { label: string; value: string }[];
   /** The table column that shows this field, for Visible / Hidden grouping. */
   column?: string;
+  /** A relation's linked entity: its values are that entity's record ids. */
+  entity?: EntityType;
+  /** Names a value for the rule's chip (a relation's record name). */
+  labelOf?: (value: string) => string;
 }
 
 export interface FilterRule {
@@ -74,6 +80,12 @@ export const OPERATORS: Record<FieldType, Operator[]> = {
     { op: "is_not_empty", label: "is not empty" },
   ],
   boolean: [{ op: "is", label: "is" }],
+  relation: [
+    { op: "is", label: "is" },
+    { op: "is_not", label: "is not" },
+    { op: "is_empty", label: "is empty" },
+    { op: "is_not_empty", label: "is not empty" },
+  ],
 };
 
 const VALUELESS = new Set(["is_empty", "is_not_empty", "today", "in_past", "in_future"]);
@@ -81,9 +93,9 @@ export const needsValue = (op: string) => !VALUELESS.has(op);
 
 export const defaultOp = (type: FieldType) => OPERATORS[type][0].op;
 
-/** A fresh rule for a field; enum rules hold a list of values. */
+/** A fresh rule for a field; enum and relation rules hold a list of values. */
 export function newRule(field: FilterField): FilterRule {
-  if (field.type === "enum") return { field: field.key, op: "is", value: [] };
+  if (field.type === "enum" || field.type === "relation") return { field: field.key, op: "is", value: [] };
   if (field.type === "boolean") return { field: field.key, op: "is", value: "1" };
   if (field.type === "date") return { field: field.key, op: "relative", value: "PAST_7_DAY" };
   return { field: field.key, op: defaultOp(field.type), value: "" };
@@ -136,7 +148,7 @@ const formatDay = (v: unknown) => {
 /** A rule as its chip reads: "Status: Lead, Customer", "Created: past 7 days", "Score ≥ 5". */
 export function describeRule(r: FilterRule, field: FilterField | undefined): string {
   const label = field?.label ?? r.field;
-  const optionLabel = (v: string) => field?.options?.find((o) => o.value === v)?.label ?? v;
+  const optionLabel = (v: string) => field?.labelOf?.(v) ?? field?.options?.find((o) => o.value === v)?.label ?? v;
   const values = Array.isArray(r.value) ? r.value.map(optionLabel).join(", ") : optionLabel(r.value ?? "");
   switch (r.op) {
     case "contains": case "is": return field?.type === "number" ? `${label} = ${values}` : `${label}: ${values}`;
@@ -158,13 +170,16 @@ export function describeRule(r: FilterRule, field: FilterField | undefined): str
   }
 }
 
-/** The filterable fields of an entity: its built-ins, then its custom fields by storage type. */
+/** The filterable fields of an entity: its built-ins, then its custom fields by
+ *  storage type. A relation filters on its many_to_one side only: the other
+ *  side has no column of its own. */
 export function fieldsFromDefs(
   builtins: FilterField[],
-  defs: { key: string; label: string; field_type: string; custom_field: string; options: Record<string, unknown> }[],
+  defs: { key: string; label: string; field_type: string; custom_field: string; options: Record<string, unknown>; relation_type: string | null; target_entity: EntityType | null }[],
 ): FilterField[] {
-  const custom: FilterField[] = defs.map((d) => {
+  const custom: FilterField[] = defs.filter((d) => d.relation_type !== "one_to_many").map((d) => {
     const base = { key: d.key, label: d.label, column: d.key };
+    if (d.field_type === "relation" && d.target_entity) return { ...base, type: "relation", entity: d.target_entity };
     if (d.custom_field === "clawnify::score.score" || d.field_type === "integer" || d.field_type === "decimal") return { ...base, type: "number" };
     if (d.custom_field === "clawnify::badge.badge" || d.field_type === "enumeration") {
       const vals = Array.isArray(d.options.enum) ? (d.options.enum as string[]) : [];
