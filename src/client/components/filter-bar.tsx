@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ChevronDown, ChevronLeft, Filter as FilterIcon, ListFilter, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ const chip = "inline-flex h-7 items-center gap-1 rounded-sm bg-card pl-2 pr-1 te
  * while the list differs from its view. Editing applies at once; a rule still
  * being typed is left out of the query until it has a value.
  */
-export function FilterBar({ leading, fields: baseFields, filters, onChange, isVisible, dirty, onSave, onReset }: {
+export function FilterBar({ leading, fields: baseFields, filters, onChange, isVisible, dirty, onSave, onReset, locked = false, onSaveAs }: {
   leading?: ReactNode;
   fields: FilterField[];
   filters: FilterNode[];
@@ -33,6 +33,9 @@ export function FilterBar({ leading, fields: baseFields, filters, onChange, isVi
   dirty: boolean;
   onSave: () => void;
   onReset: () => void;
+  /** The view can't take changes (the default "All …" view): offer a new view instead of Update view. */
+  locked?: boolean;
+  onSaveAs?: (name: string) => Promise<void>;
 }) {
   // Relation rules hold record ids; their chips and lists show the records' names.
   const name = useRecordNames(relationValues(baseFields, filters));
@@ -129,7 +132,9 @@ export function FilterBar({ leading, fields: baseFields, filters, onChange, isVi
         {dirty && (
           <>
             <Button size="sm" variant="ghost" onClick={onReset}>Reset</Button>
-            <Button size="sm" variant="secondary" onClick={onSave}>Update view</Button>
+            {locked
+              ? onSaveAs && <SaveAsView onSave={onSaveAs} />
+              : <Button size="sm" variant="secondary" onClick={onSave}>Update view</Button>}
           </>
         )}
         <Popover open={open?.kind === "add"} onOpenChange={onOpenChange({ kind: "add" })}>
@@ -164,6 +169,40 @@ export function FilterBar({ leading, fields: baseFields, filters, onChange, isVi
         </Popover>
       </div>
     </div>
+  );
+}
+
+/** "Save as new view": a name, then Create. The list as it is now becomes that view. */
+function SaveAsView({ onSave }: { onSave: (name: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n) return;
+    setBusy(true);
+    try {
+      await onSave(n);
+      setOpen(false);
+      setName("");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="secondary">Save as new view</Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64">
+        <form onSubmit={submit} className="flex flex-col gap-2 p-2">
+          <Input autoFocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="View name" aria-label="View name" className="h-8" />
+          <p className="px-0.5 text-xs text-muted-foreground">Keeps these filters, sort and columns. Everyone in the org will see it.</p>
+          <Button type="submit" size="sm" disabled={busy || !name.trim()} className="w-full">Create</Button>
+        </form>
+      </PopoverContent>
+    </Popover>
   );
 }
 

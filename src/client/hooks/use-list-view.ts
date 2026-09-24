@@ -142,5 +142,8 @@ export function useListView({ entity, table, filtersParam, pag, setFilters: appl
     } catch (e) { fail("delete the view")(e); }
   }, [view, table, navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { view, views: table.views, filters, setFilters: setDraft as (next: FilterNode[]) => void, dirty, update, reset, open, create, rename, remove };
+  // The default view is locked: its filters and sort are for the moment only,
+  // kept by saving a new view.
+  const locked = !!view?.isDefault;
+  return { view, views: table.views, filters, setFilters: setDraft as (next: FilterNode[]) => void, dirty, locked, update, reset, open, create, rename, remove };
 }

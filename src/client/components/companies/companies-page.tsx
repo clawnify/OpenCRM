@@ -209,6 +209,8 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
         isVisible={view.visible}
         dirty={listView.dirty}
         onSave={listView.update}
+        locked={listView.locked}
+        onSaveAs={listView.create}
         onReset={listView.reset}
       />
 
