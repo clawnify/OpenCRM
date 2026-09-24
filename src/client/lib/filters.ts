@@ -171,13 +171,12 @@ export function describeRule(r: FilterRule, field: FilterField | undefined): str
 }
 
 /** The filterable fields of an entity: its built-ins, then its custom fields by
- *  storage type. A relation filters on its many_to_one side only: the other
- *  side has no column of its own. */
+ *  storage type. Both sides of a relation filter by the records they link. */
 export function fieldsFromDefs(
   builtins: FilterField[],
   defs: { key: string; label: string; field_type: string; custom_field: string; options: Record<string, unknown>; relation_type: string | null; target_entity: EntityType | null }[],
 ): FilterField[] {
-  const custom: FilterField[] = defs.filter((d) => d.relation_type !== "one_to_many").map((d) => {
+  const custom: FilterField[] = defs.map((d) => {
     const base = { key: d.key, label: d.label, column: d.key };
     if (d.field_type === "relation" && d.target_entity) return { ...base, type: "relation", entity: d.target_entity };
     if (d.custom_field === "clawnify::score.score" || d.field_type === "integer" || d.field_type === "decimal") return { ...base, type: "number" };

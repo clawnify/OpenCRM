@@ -1,3 +1,5 @@
+import { api } from "@/api";
+
 // A cell a spreadsheet would run as a formula (=, +, -, @, tab, CR) gets a
 // leading apostrophe: record data is user input, and an exported CSV is
 // opened in Excel or Sheets.
@@ -15,4 +17,44 @@ export function downloadCsv(filename: string, header: string[], rows: string[][]
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** At most this many rows in one export: 100 pages of the list API. */
+const MAX_EXPORT_ROWS = 10_000;
+
+/**
+ * Downloads a saved view as a CSV: the name column and the view's visible
+ * columns, over every record its saved filters and sort select (not what the
+ * page shows now, and not unsaved edits). `listPath` is the list API
+ * ("/api/contacts"), whose rows come under `rowsKey`.
+ */
+// shortcut: pages through the list API from the browser; a server-side CSV
+// stream if exports outgrow 10k rows.
+export async function exportViewCsv<T>(opts: {
+  view: { id: string; name: string; filters: unknown[]; sort: string | null; order: "asc" | "desc" | null };
+  listPath: string;
+  rowsKey: string;
+  name: { label: string; text: (row: T) => string };
+  columns: { key: string; label: string; text: (row: T) => string }[];
+}): Promise<void> {
+  const { view, listPath, rowsKey, name, columns } = opts;
+  const { fields } = await api<{ fields: { key: string; visible: boolean }[] }>("GET", `/api/views/${view.id}/fields`);
+  const hidden = new Set(fields.filter((f) => !f.visible).map((f) => f.key));
+  const shown = columns.filter((c) => !hidden.has(c.key));
+
+  const rows: T[] = [];
+  for (let page = 1; rows.length < MAX_EXPORT_ROWS; page++) {
+    const q = new URLSearchParams({
+      page: String(page), limit: "100", sort: view.sort ?? "created_at", order: view.order ?? "desc",
+      tz: String(-new Date().getTimezoneOffset()),
+    });
+    if (view.filters.length) q.set("filters", JSON.stringify(view.filters));
+    const data = await api<Record<string, unknown>>("GET", `${listPath}?${q}`);
+    const batch = (data[rowsKey] as T[]) ?? [];
+    rows.push(...batch);
+    if (!batch.length || rows.length >= Number(data.total)) break;
+  }
+
+  const file = `${view.name.replace(/[^\w\- ]+/g, "").trim() || "export"}.csv`;
+  downloadCsv(file, [name.label, ...shown.map((c) => c.label)], rows.slice(0, MAX_EXPORT_ROWS).map((r) => [name.text(r), ...shown.map((c) => c.text(r))]));
 }

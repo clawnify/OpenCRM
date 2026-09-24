@@ -18,7 +18,7 @@ import { CustomFieldDisplay, readCustom } from "@/lib/custom-fields";
 import { relationColumn } from "@/lib/relations";
 import { customFieldCopy, customFieldEdit, textEdit, valuesEdit } from "@/components/cell-editors";
 import { useTableView, useAggregates, listFilterQuery } from "@/hooks/use-table-view";
-import { downloadCsv } from "@/lib/csv";
+import { downloadCsv, exportViewCsv } from "@/lib/csv";
 import type { Company } from "@/types";
 
 const dash = <span className="text-muted-foreground">—</span>;
@@ -32,6 +32,7 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
       { key: "name", label: "Name", type: "text", column: "name" },
       { key: "domain", label: "Domain", type: "text", column: "domain" },
       { key: "industry", label: "Industry", type: "text", column: "industry" },
+      { key: "contacts", label: "Contacts", type: "relation", entity: "contact", column: "contacts" },
       { key: "phone", label: "Phone", type: "text" },
       { key: "email", label: "Email", type: "text" },
       { key: "created_at", label: "Created", type: "date" },
@@ -199,6 +200,7 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
             onCreate={listView.create}
             onRename={listView.rename}
             onDelete={listView.remove}
+            onExport={(v) => exportViewCsv<Company>({ view: v, listPath: "/api/companies", rowsKey: "companies", name, columns }).catch((e) => setError(e instanceof Error ? e.message : "Could not export"))}
           />
         }
         fields={filterFields}

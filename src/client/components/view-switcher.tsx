@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ChevronDown, Lock, MoreVertical, Plus, Table2, TextCursorInput, Trash2, X } from "lucide-react";
+import { ChevronDown, Download, Lock, MoreVertical, Plus, Table2, TextCursorInput, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -15,7 +15,7 @@ type Step = "list" | "create" | "delete";
  * own input, in place: no pen, no form) and Delete. "+ Add view" makes a view from the list
  * as it is now.
  */
-export function ViewSwitcher({ views, current, count, onOpen, onCreate, onRename, onDelete }: {
+export function ViewSwitcher({ views, current, count, onOpen, onCreate, onRename, onDelete, onExport }: {
   views: ListView[];
   current: ListView | undefined;
   count: number;
@@ -23,6 +23,8 @@ export function ViewSwitcher({ views, current, count, onOpen, onCreate, onRename
   onCreate: (name: string) => Promise<void>;
   onRename: (v: ListView, name: string) => Promise<void>;
   onDelete: (v: ListView) => Promise<void>;
+  /** Downloads the view as a CSV (its saved filters, sort and columns). */
+  onExport: (v: ListView) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>("list");
@@ -84,6 +86,7 @@ export function ViewSwitcher({ views, current, count, onOpen, onCreate, onRename
                     <RowMenu
                       name={v.name}
                       onRename={() => setRenaming(v.id)}
+                      onExport={() => { show(false); void onExport(v); }}
                       onDelete={() => { setTarget(v); setStep("delete"); }}
                     />
                   )}
@@ -169,8 +172,8 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (next: stri
   );
 }
 
-/** A non-default view's ⋮: Edit and Delete. Shown on hover, always for an agent. */
-function RowMenu({ name, onRename, onDelete }: { name: string; onRename: () => void; onDelete: () => void }) {
+/** A non-default view's ⋮: Edit, Export and Delete. Shown on hover, always for an agent. */
+function RowMenu({ name, onRename, onExport, onDelete }: { name: string; onRename: () => void; onExport: () => void; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -192,6 +195,9 @@ function RowMenu({ name, onRename, onDelete }: { name: string; onRename: () => v
             <CommandGroup>
               <CommandItem value="Edit" onSelect={() => { setOpen(false); onRename(); }}>
                 <TextCursorInput className="size-3.5 text-muted-foreground" /> Edit
+              </CommandItem>
+              <CommandItem value="Export" onSelect={() => { setOpen(false); onExport(); }}>
+                <Download className="size-3.5 text-muted-foreground" /> Export
               </CommandItem>
               <CommandItem value="Delete" onSelect={() => { setOpen(false); onDelete(); }} className="text-destructive">
                 <Trash2 className="size-3.5" /> Delete

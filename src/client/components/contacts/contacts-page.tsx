@@ -19,7 +19,7 @@ import { CustomFieldDisplay, readCustom } from "@/lib/custom-fields";
 import { relationColumn } from "@/lib/relations";
 import { customFieldCopy, customFieldEdit, optionEdit, recordEdit, textEdit } from "@/components/cell-editors";
 import { useTableView, useAggregates, listFilterQuery } from "@/hooks/use-table-view";
-import { downloadCsv } from "@/lib/csv";
+import { downloadCsv, exportViewCsv } from "@/lib/csv";
 import type { Contact } from "@/types";
 
 const dash = <span className="text-muted-foreground">—</span>;
@@ -38,6 +38,8 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
       { key: "last_name", label: "Last name", type: "text", column: "name" },
       { key: "email", label: "Email", type: "text", column: "email" },
       { key: "phone", label: "Phone", type: "text", column: "phone" },
+      { key: "company_id", label: "Company", type: "relation", entity: "company", column: "company" },
+      { key: "deals", label: "Deals", type: "relation", entity: "deal" },
       { key: "title", label: "Title", type: "text", column: "title" },
       { key: "status", label: "Status", type: "enum", column: "status", options: STATUSES.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })) },
       { key: "created_at", label: "Created", type: "date" },
@@ -203,6 +205,7 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
             onCreate={listView.create}
             onRename={listView.rename}
             onDelete={listView.remove}
+            onExport={(v) => exportViewCsv<Contact>({ view: v, listPath: "/api/contacts", rowsKey: "contacts", name, columns }).catch((e) => setError(e instanceof Error ? e.message : "Could not export"))}
           />
         }
         fields={filterFields}
