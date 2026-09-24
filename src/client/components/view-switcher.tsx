@@ -10,10 +10,10 @@ import { cn } from "@/lib/utils";
 type Step = "list" | "create" | "delete";
 
 /**
- * The view bar's title: "<View> · <count> ⌄". Opens the list's views: the
- * default one shows a lock, the others a ⋮ with Edit (the name turns into its
- * own input, in place: no pen, no form) and Delete. "+ Add view" makes a view from the list
- * as it is now.
+ * The view bar's title: "<View> · <count> ⌄". Opens the list's views, each
+ * with a ⋮: Edit (the name turns into its own input, in place: no pen, no
+ * form), Export and Delete. The default view shows a lock and only exports.
+ * "+ Add view" makes a view from the list as it is now.
  */
 export function ViewSwitcher({ views, current, count, onOpen, onCreate, onRename, onDelete, onExport }: {
   views: ListView[];
@@ -77,17 +77,17 @@ export function ViewSwitcher({ views, current, count, onOpen, onCreate, onRename
                       className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-[0.8125rem]"
                     >
                       <Table2 className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate">{v.name}</span>
+                      <span className="min-w-0 truncate">{v.name}</span>
+                      {v.isDefault && <Lock className="size-3 shrink-0 text-faint" aria-label="Locked: the whole list" />}
                     </button>
                   )}
-                  {v.isDefault ? (
-                    <Lock className="mx-1.5 size-3 shrink-0 text-faint" aria-label="Default view, can't be deleted" />
-                  ) : renaming !== v.id && (
+                  {renaming !== v.id && (
+                    // The default view exports; only saved views rename and delete.
                     <RowMenu
                       name={v.name}
-                      onRename={() => setRenaming(v.id)}
+                      onRename={v.isDefault ? undefined : () => setRenaming(v.id)}
                       onExport={() => { show(false); void onExport(v); }}
-                      onDelete={() => { setTarget(v); setStep("delete"); }}
+                      onDelete={v.isDefault ? undefined : () => { setTarget(v); setStep("delete"); }}
                     />
                   )}
                 </li>
@@ -172,8 +172,8 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (next: stri
   );
 }
 
-/** A non-default view's ⋮: Edit, Export and Delete. Shown on hover, always for an agent. */
-function RowMenu({ name, onRename, onExport, onDelete }: { name: string; onRename: () => void; onExport: () => void; onDelete: () => void }) {
+/** A view's ⋮: Edit, Export and Delete (the default view: Export only). Shown on hover, always for an agent. */
+function RowMenu({ name, onRename, onExport, onDelete }: { name: string; onRename?: () => void; onExport: () => void; onDelete?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -193,15 +193,19 @@ function RowMenu({ name, onRename, onExport, onDelete }: { name: string; onRenam
         <Command>
           <CommandList>
             <CommandGroup>
-              <CommandItem value="Edit" onSelect={() => { setOpen(false); onRename(); }}>
-                <TextCursorInput className="size-3.5 text-muted-foreground" /> Edit
-              </CommandItem>
+              {onRename && (
+                <CommandItem value="Edit" onSelect={() => { setOpen(false); onRename(); }}>
+                  <TextCursorInput className="size-3.5 text-muted-foreground" /> Edit
+                </CommandItem>
+              )}
               <CommandItem value="Export" onSelect={() => { setOpen(false); onExport(); }}>
                 <Download className="size-3.5 text-muted-foreground" /> Export
               </CommandItem>
-              <CommandItem value="Delete" onSelect={() => { setOpen(false); onDelete(); }} className="text-destructive">
-                <Trash2 className="size-3.5" /> Delete
-              </CommandItem>
+              {onDelete && (
+                <CommandItem value="Delete" onSelect={() => { setOpen(false); onDelete(); }} className="text-destructive">
+                  <Trash2 className="size-3.5" /> Delete
+                </CommandItem>
+              )}
             </CommandGroup>
           </CommandList>
         </Command>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, Plus, Upload, Trash2, Download, X, ExternalLink } from "lucide-react";
+import { Search, Plus, Upload, Trash2, X, ExternalLink } from "lucide-react";
 import { useCrm } from "@/context";
 import { PageHeader, EntityIcon, CategoryBadge, EmptyState } from "@/components/shared";
 import { CompanyDialog } from "@/components/companies/company-dialog";
@@ -18,7 +18,8 @@ import { CustomFieldDisplay, readCustom } from "@/lib/custom-fields";
 import { relationColumn } from "@/lib/relations";
 import { customFieldCopy, customFieldEdit, textEdit, valuesEdit } from "@/components/cell-editors";
 import { useTableView, useAggregates, listFilterQuery } from "@/hooks/use-table-view";
-import { downloadCsv, exportViewCsv } from "@/lib/csv";
+import { downloadCsv, exportListCsv, exportViewCsv } from "@/lib/csv";
+import { ExportButton } from "@/components/export-button";
 import type { Company } from "@/types";
 
 const dash = <span className="text-muted-foreground">—</span>;
@@ -138,6 +139,13 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
     downloadCsv("companies.csv", [name.label, ...shown.map((c) => c.label)], rows.map((r) => [name.text(r), ...shown.map((c) => c.text(r))]));
   };
 
+  // Every record the list selects as it is now (filters, search, sort, the columns on screen).
+  const exportAll = () => exportListCsv<Company>({
+    filename: listView.view?.name ?? "companies", listPath: "/api/companies", rowsKey: "companies", name,
+    columns: columns.filter((c) => view.visible(c.key)),
+    query: { filters: sanitize(companiesPag.filters), sort: companiesPag.sort, order: companiesPag.order, search: companiesPag.search },
+  }).catch((e) => setError(e instanceof Error ? e.message : "Could not export"));
+
   const confirmDelete = async () => {
     const ids = [...selected];
     setDeleting(true);
@@ -162,10 +170,7 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
               <X className="size-4" />
               Clear
             </Button>
-            <Button size="sm" variant="secondary" onClick={exportSelected}>
-              <Download className="size-4" />
-              Export
-            </Button>
+            <ExportButton selected={selected.size} pageRows={companies.length} total={companiesPag.total} onSelected={exportSelected} onAll={exportAll} />
             <Button size="sm" variant="destructive" onClick={() => setConfirmOpen(true)}>
               <Trash2 className="size-4" />
               Delete
