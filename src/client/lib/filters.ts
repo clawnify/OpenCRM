@@ -176,6 +176,9 @@ export function fieldsFromDefs(
   builtins: FilterField[],
   defs: { key: string; label: string; field_type: string; custom_field: string; options: Record<string, unknown>; relation_type: string | null; target_entity: EntityType | null }[],
 ): FilterField[] {
+  // A many side can also be counted: "Partner contacts count ≥ 2".
+  const counts: FilterField[] = defs.filter((d) => d.relation_type === "one_to_many")
+    .map((d) => ({ key: `count:${d.key}`, label: `${d.label} count`, type: "number", column: d.key }));
   const custom: FilterField[] = defs.map((d) => {
     const base = { key: d.key, label: d.label, column: d.key };
     if (d.field_type === "relation" && d.target_entity) return { ...base, type: "relation", entity: d.target_entity };
@@ -188,5 +191,5 @@ export function fieldsFromDefs(
     if (d.field_type === "date" || d.field_type === "datetime") return { ...base, type: "date" };
     return { ...base, type: "text" };
   });
-  return [...builtins, ...custom];
+  return [...builtins, ...custom, ...counts];
 }

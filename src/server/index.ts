@@ -19,7 +19,7 @@ import {
   type EntityType,
   type CustomFieldDef,
 } from "./custom-fields.js";
-import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, type ManyLink } from "./relations.js";
+import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, countSQL, countOf, type ManyLink } from "./relations.js";
 
 // In production Clawnify injects the CREDENTIALS broker binding + CLAWNIFY_ORG_ID
 // whenever clawnify.json declares `app.credentials`. SLACK_CHANNEL is an optional
@@ -332,7 +332,20 @@ function buildFilters(cols: Set<string>, raw: string | undefined, prefix = "", t
     }
   };
 
+  // "count:<many side>" compares how many records link back: Contacts count ≥ 3.
+  const countLeaf = (link: ManyLink, r: FilterRule): string | null => {
+    if (r.op === "is_empty") return `${countSQL(link, prefix)} = 0`;
+    if (r.op === "is_not_empty") return `${countSQL(link, prefix)} > 0`;
+    const n = Number(typeof r.value === "string" || typeof r.value === "number" ? r.value : NaN);
+    const op = ({ is: "=", is_not: "!=", gt: ">", gte: ">=", lt: "<", lte: "<=" } as Record<string, string>)[String(r.op)];
+    if (!op || !Number.isFinite(n)) return null;
+    params.push(n);
+    return `${countSQL(link, prefix)} ${op} ?`;
+  };
+
   const leaf = (r: FilterRule): string | null => {
+    const counted = typeof r.field === "string" ? countOf(r.field) : null;
+    if (counted && many[counted] && prefix) return countLeaf(many[counted], r);
     if (typeof r.field === "string" && typeof r.op === "string" && many[r.field] && prefix) return manyLeaf(many[r.field], r);
     if (typeof r.field !== "string" || !cols.has(r.field) || typeof r.op !== "string") return null;
     const col = `${prefix}${qid(r.field)}`;
@@ -583,13 +596,16 @@ app.openapi(listCompanies, async (c) => {
     const limit = Math.min(100, Math.max(1, parseInt(q.limit || "25", 10)));
     const offset = (page - 1) * limit;
     const cols = await tableColumns("companies");
+    const many = await manyLinks("company");
     let sortCol = q.sort || "id";
-    if (!cols.has(sortCol)) sortCol = "id";
+    const counted = countOf(sortCol);
+    const countSort = counted && many[counted] ? countSQL(many[counted], "c.") : null;
+    if (!countSort && !cols.has(sortCol)) sortCol = "id";
     let order = (q.order || "desc").toLowerCase();
     if (order !== "asc" && order !== "desc") order = "desc";
-    const sortSQL = (await relationSortSQL("company", "c", sortCol)) ?? `c.${qid(sortCol)}`;
+    const sortSQL = countSort ?? (await relationSortSQL("company", "c", sortCol)) ?? `c.${qid(sortCol)}`;
 
-    const { whereSQL, params } = companiesWhere(q, cols, await manyLinks("company"));
+    const { whereSQL, params } = companiesWhere(q, cols, many);
 
     const countResult = await get<{ total: number }>(
       "SELECT COUNT(*) as total FROM companies c" + whereSQL,
@@ -884,13 +900,16 @@ app.openapi(listContacts, async (c) => {
     const limit = Math.min(100, Math.max(1, parseInt(q.limit || "25", 10)));
     const offset = (page - 1) * limit;
     const cols = await tableColumns("contacts");
+    const many = await manyLinks("contact");
     let sortCol = q.sort || "id";
-    if (!cols.has(sortCol)) sortCol = "id";
+    const counted = countOf(sortCol);
+    const countSort = counted && many[counted] ? countSQL(many[counted], "ct.") : null;
+    if (!countSort && !cols.has(sortCol)) sortCol = "id";
     let order = (q.order || "desc").toLowerCase();
     if (order !== "asc" && order !== "desc") order = "desc";
-    const sortSQL = (await relationSortSQL("contact", "ct", sortCol)) ?? `ct.${qid(sortCol)}`;
+    const sortSQL = countSort ?? (await relationSortSQL("contact", "ct", sortCol)) ?? `ct.${qid(sortCol)}`;
 
-    const { whereSQL, params } = contactsWhere(q, cols, await manyLinks("contact"));
+    const { whereSQL, params } = contactsWhere(q, cols, many);
 
     const countResult = await get<{ total: number }>(
       "SELECT COUNT(*) as total FROM contacts ct LEFT JOIN companies co ON ct.company_id = co.id" + whereSQL,
@@ -2292,6 +2311,8 @@ app.delete("/api/custom-fields/:id", async (c) => {
 // ── Views (a list's named, shared layouts) ─────────────────────────
 
 const VIEW_FIELD_KEY = /^[a-z][a-z0-9_]*$/;
+// A view's sort: a column, or "count:<many side>" (most contacts first).
+const VIEW_SORT = /^(count:)?[a-z][a-z0-9_]*$/;
 const DEFAULT_VIEW_NAMES: Record<EntityType, string> = { contact: "All contacts", company: "All companies", deal: "All deals" };
 
 interface ViewRow {
@@ -2405,7 +2426,7 @@ app.post("/api/views", async (c) => {
   if (!name) return c.json({ error: "A view needs a name of up to 60 characters" }, 400);
   const f = await viewFilters(entity, body.filters ?? []);
   if ("error" in f) return c.json({ error: f.error }, 400);
-  const sort = typeof body.sort === "string" && VIEW_FIELD_KEY.test(body.sort) ? body.sort : null;
+  const sort = typeof body.sort === "string" && VIEW_SORT.test(body.sort) ? body.sort : null;
   const order = body.order === "asc" || body.order === "desc" ? body.order : null;
   await ensureDefaultView(entity);
   const last = await get<{ p: number | null }>("SELECT MAX(position) as p FROM views WHERE entity_type = ?", [entity]);
@@ -2448,7 +2469,7 @@ app.patch("/api/views/:id", async (c) => {
     sets.push("filters = ?"); params.push(f.json);
   }
   if (body.sort !== undefined) {
-    sets.push("sort = ?"); params.push(typeof body.sort === "string" && VIEW_FIELD_KEY.test(body.sort) ? body.sort : null);
+    sets.push("sort = ?"); params.push(typeof body.sort === "string" && VIEW_SORT.test(body.sort) ? body.sort : null);
   }
   if (body.order !== undefined) {
     sets.push("sort_order = ?"); params.push(body.order === "asc" || body.order === "desc" ? body.order : null);

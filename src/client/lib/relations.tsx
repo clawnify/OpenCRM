@@ -169,12 +169,13 @@ export function relationText(def: CustomFieldDef, row: unknown): string {
   return v.items.map((r) => r.label).join(", ") + (v.total > v.items.length ? ` +${v.total - v.items.length}` : "");
 }
 
-/** A relation field's table column. Only the many_to_one side sorts (by the
- *  linked record's name) and calculates: the other side has no column. */
+/** A relation field's table column. The many_to_one side sorts by the linked
+ *  record's name, the other side by its count; only the first calculates. */
 export function relationColumn<T>(def: CustomFieldDef): RecordColumn<T> {
   const one = def.relation_type === "many_to_one";
   return {
-    key: def.key, label: def.label, sort: one ? def.key : undefined, kind: "text", calculate: one,
+    // The many side sorts by how many records it links.
+    key: def.key, label: def.label, sort: one ? def.key : `count:${def.key}`, kind: "text", calculate: one,
     text: (row) => relationText(def, row),
     render: (row) => <RelationCell def={def} row={row} />,
   };

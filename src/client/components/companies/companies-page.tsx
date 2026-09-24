@@ -33,6 +33,7 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
       { key: "domain", label: "Domain", type: "text", column: "domain" },
       { key: "industry", label: "Industry", type: "text", column: "industry" },
       { key: "contacts", label: "Contacts", type: "relation", entity: "contact", column: "contacts" },
+      { key: "count:contacts", label: "Contacts count", type: "number", column: "contacts" },
       { key: "phone", label: "Phone", type: "text" },
       { key: "email", label: "Email", type: "text" },
       { key: "created_at", label: "Created", type: "date" },
@@ -87,7 +88,7 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
       render: (c) => <CustomFieldDisplay def={def} value={readCustom(c, def.key)} />,
     })),
     {
-      key: "contacts", label: "Contacts", align: "right", kind: "number", text: (c) => String(c.contact_count ?? 0),
+      key: "contacts", label: "Contacts", align: "right", kind: "number", sort: "count:contacts", text: (c) => String(c.contact_count ?? 0),
       render: (c) => <span className="tabular">{c.contact_count ?? 0}</span>,
     },
   ];
