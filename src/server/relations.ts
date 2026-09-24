@@ -127,6 +127,29 @@ export async function relationWriteError(entity: EntityType, values: Record<stri
   return null;
 }
 
+/** A one_to_many side as a filter can reach it: the linked table and the column there that points back. */
+export interface ManyLink {
+  table: string;
+  fk: string;
+}
+
+/** The built-in one_to_many sides: a company's contacts, a contact's deals. */
+const BUILTIN_MANY: Partial<Record<EntityType, Record<string, ManyLink>>> = {
+  company: { contacts: { table: "contacts", fk: "company_id" } },
+  contact: { deals: { table: "deals", fk: "contact_id" } },
+};
+
+/** The one_to_many sides of `entity`, built-in and custom, by key, for filters ("Referrals is Nora"). */
+export async function manyLinks(entity: EntityType): Promise<Record<string, ManyLink>> {
+  const out: Record<string, ManyLink> = { ...BUILTIN_MANY[entity] };
+  for (const def of await relationDefs(entity)) {
+    if (def.relation_type !== "one_to_many" || !def.inverse_def_id) continue;
+    const inverse = await getDef(def.inverse_def_id);
+    if (inverse) out[def.key] = { table: ENTITY_TABLES[def.target_entity!], fk: inverse.key };
+  }
+  return out;
+}
+
 /** The built-in links, which predate relation defs: column → the entity it holds. */
 const BUILTIN_LINKS: Partial<Record<EntityType, Record<string, EntityType>>> = {
   contact: { company_id: "company" },

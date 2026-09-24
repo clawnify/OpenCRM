@@ -19,7 +19,7 @@ import {
   type EntityType,
   type CustomFieldDef,
 } from "./custom-fields.js";
-import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords } from "./relations.js";
+import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, type ManyLink } from "./relations.js";
 
 // In production Clawnify injects the CREDENTIALS broker binding + CLAWNIFY_ORG_ID
 // whenever clawnify.json declares `app.credentials`. SLACK_CHANNEL is an optional
@@ -300,7 +300,7 @@ function relativeRange(value: string, tzOffset: number): [string, string] | null
  *  values are always parameterised. `tzOffset` (minutes east of UTC) puts date
  *  rules on the viewer's local day. Invalid rules are skipped; too many
  *  values throw a FilterError. */
-function buildFilters(cols: Set<string>, raw: string | undefined, prefix = "", tzOffset = 0): { clauses: string[]; params: unknown[] } {
+function buildFilters(cols: Set<string>, raw: string | undefined, prefix = "", tzOffset = 0, many: Record<string, ManyLink> = {}): { clauses: string[]; params: unknown[] } {
   const params: unknown[] = [];
   let nodes: unknown[] = [];
   try { const a = JSON.parse(raw || "[]"); if (Array.isArray(a)) nodes = a; } catch { /* ignore */ }
@@ -314,7 +314,26 @@ function buildFilters(cols: Set<string>, raw: string | undefined, prefix = "", t
   };
   const today = () => { params.push(mod); return "date('now', ?)"; };
 
+  // A one_to_many field has no column here: it matches through the linked
+  // records that point back at this row (`prefix` must name the row's table).
+  const manyLeaf = (link: ManyLink, r: FilterRule): string | null => {
+    const linked = `SELECT 1 FROM ${link.table} m WHERE m.${qid(link.fk)} = ${prefix}id`;
+    const ids = Array.isArray(r.value) ? r.value.filter((v): v is string => typeof v === "string") : [];
+    switch (r.op) {
+      case "is_empty": return `NOT EXISTS (${linked})`;
+      case "is_not_empty": return `EXISTS (${linked})`;
+      case "is": case "is_not": {
+        if (!ids.length) return null;
+        params.push(...ids);
+        const any = `EXISTS (${linked} AND m.id IN (${ids.map(() => "?").join(", ")}))`;
+        return r.op === "is" ? any : `NOT ${any}`;
+      }
+      default: return null;
+    }
+  };
+
   const leaf = (r: FilterRule): string | null => {
+    if (typeof r.field === "string" && typeof r.op === "string" && many[r.field] && prefix) return manyLeaf(many[r.field], r);
     if (typeof r.field !== "string" || !cols.has(r.field) || typeof r.op !== "string") return null;
     const col = `${prefix}${qid(r.field)}`;
     const list = Array.isArray(r.value) ? r.value.filter((v): v is string => typeof v === "string") : null;
@@ -519,7 +538,7 @@ const listCompanies = createRoute({
 
 /** The companies list's WHERE: search, industry and filters. Shared by the
  *  list and its footer aggregates, so both see the same rows. */
-function companiesWhere(q: { search?: string; industry?: string; filters?: string; tz?: string }, cols: Set<string>) {
+function companiesWhere(q: { search?: string; industry?: string; filters?: string; tz?: string }, cols: Set<string>, many: Record<string, ManyLink> = {}) {
   const where: string[] = [];
   const params: unknown[] = [];
   const search = (q.search || "").trim();
@@ -532,7 +551,7 @@ function companiesWhere(q: { search?: string; industry?: string; filters?: strin
     where.push("industry = ?");
     params.push(industry);
   }
-  const flt = buildFilters(cols, q.filters, "", tzOffsetOf(q.tz));
+  const flt = buildFilters(cols, q.filters, "c.", tzOffsetOf(q.tz), many);
   where.push(...flt.clauses);
   params.push(...flt.params);
   return { whereSQL: where.length ? " WHERE " + where.join(" AND ") : "", params };
@@ -543,7 +562,7 @@ app.get("/api/companies/aggregates", async (c) => {
   try {
     const q = c.req.query();
     const cols = await tableColumns("companies");
-    const { whereSQL, params } = companiesWhere(q, cols);
+    const { whereSQL, params } = companiesWhere(q, cols, await manyLinks("company"));
     const values = await aggregateColumns("companies c", whereSQL, params, {
       name: { sql: "c.name", kind: "text" },
       domain: { sql: "c.domain", kind: "text" },
@@ -570,10 +589,10 @@ app.openapi(listCompanies, async (c) => {
     if (order !== "asc" && order !== "desc") order = "desc";
     const sortSQL = (await relationSortSQL("company", "c", sortCol)) ?? `c.${qid(sortCol)}`;
 
-    const { whereSQL, params } = companiesWhere(q, cols);
+    const { whereSQL, params } = companiesWhere(q, cols, await manyLinks("company"));
 
     const countResult = await get<{ total: number }>(
-      "SELECT COUNT(*) as total FROM companies" + whereSQL,
+      "SELECT COUNT(*) as total FROM companies c" + whereSQL,
       [...params],
     );
     const total = countResult?.total || 0;
@@ -811,7 +830,7 @@ const listContacts = createRoute({
 
 /** The contacts list's WHERE: search, status, company and filters. Shared by
  *  the list and its footer aggregates, so both see the same rows. */
-function contactsWhere(q: { search?: string; status?: string; company_id?: string; filters?: string; tz?: string }, cols: Set<string>) {
+function contactsWhere(q: { search?: string; status?: string; company_id?: string; filters?: string; tz?: string }, cols: Set<string>, many: Record<string, ManyLink> = {}) {
   const where: string[] = [];
   const params: unknown[] = [];
   const search = (q.search || "").trim();
@@ -831,7 +850,7 @@ function contactsWhere(q: { search?: string; status?: string; company_id?: strin
     where.push("ct.company_id = ?");
     params.push(companyId);
   }
-  const flt = buildFilters(cols, q.filters, "ct.", tzOffsetOf(q.tz));
+  const flt = buildFilters(cols, q.filters, "ct.", tzOffsetOf(q.tz), many);
   where.push(...flt.clauses);
   params.push(...flt.params);
   return { whereSQL: where.length ? " WHERE " + where.join(" AND ") : "", params };
@@ -842,7 +861,7 @@ app.get("/api/contacts/aggregates", async (c) => {
   try {
     const q = c.req.query();
     const cols = await tableColumns("contacts");
-    const { whereSQL, params } = contactsWhere(q, cols);
+    const { whereSQL, params } = contactsWhere(q, cols, await manyLinks("contact"));
     const values = await aggregateColumns("contacts ct LEFT JOIN companies co ON ct.company_id = co.id", whereSQL, params, {
       name: { sql: "TRIM(COALESCE(ct.first_name, '') || ' ' || COALESCE(ct.last_name, ''))", kind: "text" },
       email: { sql: "ct.email", kind: "text" },
@@ -871,7 +890,7 @@ app.openapi(listContacts, async (c) => {
     if (order !== "asc" && order !== "desc") order = "desc";
     const sortSQL = (await relationSortSQL("contact", "ct", sortCol)) ?? `ct.${qid(sortCol)}`;
 
-    const { whereSQL, params } = contactsWhere(q, cols);
+    const { whereSQL, params } = contactsWhere(q, cols, await manyLinks("contact"));
 
     const countResult = await get<{ total: number }>(
       "SELECT COUNT(*) as total FROM contacts ct LEFT JOIN companies co ON ct.company_id = co.id" + whereSQL,
@@ -1382,7 +1401,7 @@ const getDealsBoard = createRoute({
 app.openapi(getDealsBoard, async (c) => {
   try {
     const q = c.req.valid("query");
-    const flt = buildFilters(await tableColumns("deals"), q.filters, "d.", tzOffsetOf(q.tz));
+    const flt = buildFilters(await tableColumns("deals"), q.filters, "d.", tzOffsetOf(q.tz), await manyLinks("deal"));
     const whereSQL = flt.clauses.length ? " WHERE " + flt.clauses.join(" AND ") : "";
     const rows = await query(
       `SELECT d.*,

@@ -25,6 +25,7 @@ export function DealsBoard() {
     [
       { key: "name", label: "Name", type: "text", column: "name" },
       { key: "value", label: "Value", type: "number", column: "value" },
+      { key: "contact_id", label: "Contact", type: "relation", entity: "contact", column: "contact_id" },
       { key: "stage", label: "Stage", type: "enum", column: "stage", options: stages.map((s) => ({ label: s.label, value: s.key })) },
       { key: "close_date", label: "Close date", type: "date", column: "close_date" },
       { key: "notes", label: "Notes", type: "text", column: "notes" },
