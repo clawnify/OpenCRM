@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import type { View, Contact, Company, Deal, Stats, PaginatedState, StageDef, Activity, ConnectionStatus, EntityType, CustomFieldDef, ImportRow, ImportEntity, ImportResult } from "./types";
+import type { FilterNode } from "./lib/filters";
 
 export interface CrmContextValue {
   isAgent: boolean;
@@ -42,6 +43,9 @@ export interface CrmContextValue {
   updateDeal: (id: string, data: Partial<Deal>) => Promise<void>;
   deleteDeal: (id: string) => Promise<void>;
   boardDeals: Deal[];
+  // The board's own filters (the same rule tree as the lists' filters).
+  boardFilters: FilterNode[];
+  setBoardFilters: (filters: FilterNode[]) => void;
 
   // Integrations (Clawnify connections)
   connections: ConnectionStatus;
