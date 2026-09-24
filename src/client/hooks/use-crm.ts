@@ -4,7 +4,7 @@ import type {
   Contact, Company, Deal, Stats, PaginatedState, StageDef,
   Activity, ConnectionStatus, EntityType, CustomFieldDef, ImportRow, ImportEntity, ImportResult,
 } from "../types";
-import { sanitize } from "@/lib/filters";
+import { sanitize, type FilterNode } from "@/lib/filters";
 import type { CrmContextValue } from "../context";
 
 const defaultPag = (sort: string): PaginatedState => ({
@@ -38,6 +38,7 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
   const [dealsPag, setDealsPag] = useState<PaginatedState>(defaultPag("created_at"));
   const [dealsTotalValue, setDealsTotalValue] = useState(0);
   const [boardDeals, setBoardDeals] = useState<Deal[]>([]);
+  const [boardFilters, setBoardFilters] = useState<FilterNode[]>([]);
 
   const [connections, setConnections] = useState<ConnectionStatus>({ email: false, meeting: false, slack: false });
   const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
@@ -70,10 +71,15 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     setDealsTotalValue(data.totalValue);
   }, []);
 
+  // The board shows every deal, narrowed only by its own filters (no paging).
   const fetchBoardDeals = useCallback(async () => {
-    const data = await api<{ deals: Deal[] }>("GET", "/api/deals/board");
+    const p = new URLSearchParams();
+    const filters = sanitize(boardFilters);
+    if (filters.length) p.set("filters", JSON.stringify(filters));
+    p.set("tz", String(-new Date().getTimezoneOffset()));
+    const data = await api<{ deals: Deal[] }>("GET", `/api/deals/board?${p}`);
     setBoardDeals(data.deals);
-  }, []);
+  }, [boardFilters]);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -121,6 +127,9 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
   useEffect(() => { fetchCompanies(companiesPag).catch((e) => setError((e as Error).message)); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [companiesPag.page, companiesPag.sort, companiesPag.order, companiesPag.search, JSON.stringify(companiesPag.filters)]);
+  useEffect(() => { fetchBoardDeals().catch((e) => setError((e as Error).message)); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(sanitize(boardFilters))]);
   useEffect(() => { fetchDeals(dealsPag).catch((e) => setError((e as Error).message)); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [dealsPag.page, dealsPag.sort, dealsPag.order, dealsPag.search]);
@@ -264,7 +273,7 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     companies, companiesPag, setCompaniesPage: coSet.setPage, setCompaniesSort: coSet.setSort, setCompaniesSearch: coSet.setSearch, setCompaniesFilters: coSet.setFilters, setCompaniesView: coSet.setView,
     addCompany, updateCompany, deleteCompanies,
     deals, dealsPag, dealsTotalValue, setDealsPage: dSet.setPage, setDealsSort: dSet.setSort, setDealsSearch: dSet.setSearch,
-    addDeal, updateDeal, deleteDeal, boardDeals,
+    addDeal, updateDeal, deleteDeal, boardDeals, boardFilters, setBoardFilters,
     connections, emailContact, scheduleMeeting,
     fetchActivities, addNote, importEntity,
     customFields, refetchCustomFields,

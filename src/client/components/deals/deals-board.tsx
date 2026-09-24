@@ -4,6 +4,7 @@ import { useCrm } from "@/context";
 import { PageHeader, Avatar, EntityIcon, EmptyState } from "@/components/shared";
 import { DealDialog } from "@/components/deals/deal-dialog";
 import { StageDialog } from "@/components/deals/stage-dialog";
+import { FilterBar } from "@/components/filter-bar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -12,10 +13,25 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { Label } from "@/components/ui/label";
 import { api } from "@/api";
 import { formatMoney, colorClasses, cn } from "@/lib/utils";
+import { fieldsFromDefs } from "@/lib/filters";
 import type { Deal, StageDef } from "@/types";
 
 export function DealsBoard() {
-  const { boardDeals, stats, dealsTotalValue, updateDeal, deleteDeal, stages, refetchStages, refetchBoard, refetchStats, setError, isAgent } = useCrm();
+  const { boardDeals, boardFilters, setBoardFilters, stats, dealsTotalValue, updateDeal, deleteDeal, stages, refetchStages, refetchBoard, refetchStats, setError, isAgent, customFields } = useCrm();
+
+  // The board has no saved views: filters apply to what it shows, and a card
+  // is either on the board or filtered out. Same rules as the lists' filters.
+  const filterFields = fieldsFromDefs(
+    [
+      { key: "name", label: "Name", type: "text", column: "name" },
+      { key: "value", label: "Value", type: "number", column: "value" },
+      { key: "stage", label: "Stage", type: "enum", column: "stage", options: stages.map((s) => ({ label: s.label, value: s.key })) },
+      { key: "close_date", label: "Close date", type: "date", column: "close_date" },
+      { key: "notes", label: "Notes", type: "text", column: "notes" },
+      { key: "created_at", label: "Created", type: "date", column: "created_at" },
+    ],
+    customFields.filter((d) => d.entity_type === "deal"),
+  );
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Deal | undefined>(undefined);
@@ -62,6 +78,16 @@ export function DealsBoard() {
         </div>
         {addButton}
       </PageHeader>
+
+      <FilterBar
+        fields={filterFields}
+        filters={boardFilters}
+        onChange={setBoardFilters}
+        isVisible={() => true}
+        dirty={false}
+        onSave={() => {}}
+        onReset={() => {}}
+      />
 
       {boardDeals.length === 0 && stages.length === 0 ? (
         <EmptyState title="No deals yet. Add your first." action={addButton} />

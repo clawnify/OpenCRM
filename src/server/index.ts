@@ -1368,27 +1368,35 @@ const getDealsBoard = createRoute({
   method: "get",
   path: "/api/deals/board",
   tags: ["Deals"],
-  summary: "Get all deals for the pipeline board view",
+  summary: "Get all deals for the pipeline board view, optionally filtered",
+  request: {
+    query: PaginationQuery.pick({ filters: true, tz: true }),
+  },
   responses: {
     200: { description: "All deals with contact/company info", content: { "application/json": { schema: z.object({ deals: z.array(DealSchema) }) } } },
+    400: { description: "Invalid filters", content: { "application/json": { schema: ErrorSchema } } },
     500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
   },
 });
 
 app.openapi(getDealsBoard, async (c) => {
   try {
+    const q = c.req.valid("query");
+    const flt = buildFilters(await tableColumns("deals"), q.filters, "d.", tzOffsetOf(q.tz));
+    const whereSQL = flt.clauses.length ? " WHERE " + flt.clauses.join(" AND ") : "";
     const rows = await query(
       `SELECT d.*,
               ct.first_name as contact_first_name, ct.last_name as contact_last_name,
               co.name as company_name, co.domain as company_domain
        FROM deals d
        LEFT JOIN contacts ct ON d.contact_id = ct.id
-       LEFT JOIN companies co ON ct.company_id = co.id
+       LEFT JOIN companies co ON ct.company_id = co.id` + whereSQL + `
        ORDER BY d.created_at ASC`,
+      flt.params,
     );
     return c.json({ deals: await withRelations("deal", rows as Record<string, unknown>[]) }, 200);
   } catch (err: unknown) {
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
   }
 });
 
