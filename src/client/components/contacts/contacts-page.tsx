@@ -40,6 +40,7 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
       { key: "phone", label: "Phone", type: "text", column: "phone" },
       { key: "company_id", label: "Company", type: "relation", entity: "company", column: "company" },
       { key: "deals", label: "Deals", type: "relation", entity: "deal" },
+      { key: "count:deals", label: "Deals count", type: "number" },
       { key: "title", label: "Title", type: "text", column: "title" },
       { key: "status", label: "Status", type: "enum", column: "status", options: STATUSES.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })) },
       { key: "created_at", label: "Created", type: "date" },

@@ -133,6 +133,13 @@ export interface ManyLink {
   fk: string;
 }
 
+/** How many records link back to the row named by `prefix` ("c."). */
+export const countSQL = (link: ManyLink, prefix: string) =>
+  `(SELECT COUNT(*) FROM ${link.table} m WHERE m.${qid(link.fk)} = ${prefix}id)`;
+
+/** A count field's many side: "count:contacts" → "contacts". Null for any other field. */
+export const countOf = (field: string) => (field.startsWith("count:") ? field.slice(6) : null);
+
 /** The built-in one_to_many sides: a company's contacts, a contact's deals. */
 const BUILTIN_MANY: Partial<Record<EntityType, Record<string, ManyLink>>> = {
   company: { contacts: { table: "contacts", fk: "company_id" } },
