@@ -3,8 +3,12 @@ import { Search, Upload, Plus, Trash2, Download, X } from "lucide-react";
 import { useCrm } from "@/context";
 import { PageHeader, Avatar, EntityIcon, CategoryBadge, EmptyState } from "@/components/shared";
 import { ConnectionsIndicator } from "@/components/connections-indicator";
-import { ContactDialog } from "@/components/contacts/contact-dialog";
-import { TableFilter, fieldsFromDefs } from "@/components/table-filter";
+import { ContactDialog, STATUSES } from "@/components/contacts/contact-dialog";
+import { FilterBar } from "@/components/filter-bar";
+import { fieldsFromDefs, sanitize } from "@/lib/filters";
+import { useListView } from "@/hooks/use-list-view";
+import { ViewSwitcher } from "@/components/view-switcher";
+import { withQuery } from "@/hooks/use-router";
 import { ImportDialog } from "@/components/import-dialog";
 import { RecordTable, columnKind, type NameColumn, type RecordColumn } from "@/components/record-table";
 import { contactImportConfig } from "@/lib/import-config";
@@ -21,21 +25,25 @@ const fullName = (c: Contact) => `${c.first_name} ${c.last_name}`.trim();
 
 // `openId` is the contact in the side panel beside the table, if any. Opening
 // another row swaps the panel's record in place of stacking history.
-export function ContactsPage({ navigate, openId }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string }) {
-  const { contacts, contactsPag, stats, setContactsPage, setContactsSort, setContactsSearch, setContactsFilters, deleteContacts, customFields, setError } = useCrm();
+// `viewParam` is the named view to show (absent: the default); `filtersParam`
+// a link's `?filters=`, read once (see useListView).
+export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; viewParam?: string; filtersParam?: string }) {
+  const { contacts, contactsPag, stats, setContactsPage, setContactsSort, setContactsSearch, setContactsFilters, setContactsView, deleteContacts, customFields, setError } = useCrm();
   const contactFields = customFields.filter((d) => d.entity_type === "contact");
   const filterFields = fieldsFromDefs(
     [
-      { key: "first_name", label: "First name", type: "text" },
-      { key: "last_name", label: "Last name", type: "text" },
-      { key: "email", label: "Email", type: "text" },
-      { key: "phone", label: "Phone", type: "text" },
-      { key: "title", label: "Title", type: "text" },
-      { key: "status", label: "Status", type: "text" },
+      { key: "first_name", label: "First name", type: "text", column: "name" },
+      { key: "last_name", label: "Last name", type: "text", column: "name" },
+      { key: "email", label: "Email", type: "text", column: "email" },
+      { key: "phone", label: "Phone", type: "text", column: "phone" },
+      { key: "title", label: "Title", type: "text", column: "title" },
+      { key: "status", label: "Status", type: "enum", column: "status", options: STATUSES.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })) },
+      { key: "created_at", label: "Created", type: "date" },
     ],
     contactFields,
   );
-  const view = useTableView("contact", undefined, { name: 220, email: 220, phone: 150, company: 180, title: 180, status: 130 });
+  const view = useTableView("contact", viewParam, { name: 220, email: 220, phone: 150, company: 180, title: 180, status: 130 });
+  const listView = useListView({ entity: "contact", table: view, filtersParam, pag: contactsPag, setFilters: setContactsFilters, setView: setContactsView, navigate });
 
   const name: NameColumn<Contact> = {
     label: "Name",
@@ -101,7 +109,7 @@ export function ContactsPage({ navigate, openId }: { navigate: (to: string, opts
     contacts,
   );
 
-  const openRecord = (id: string) => navigate(`/contacts?record=${encodeURIComponent(id)}`, { replace: !!openId });
+  const openRecord = (id: string) => navigate(withQuery({ record: id }), { replace: !!openId });
   const totalPages = Math.max(1, Math.ceil(contactsPag.total / contactsPag.limit));
 
   const addButton = (
@@ -123,7 +131,7 @@ export function ContactsPage({ navigate, openId }: { navigate: (to: string, opts
     try {
       await deleteContacts(ids);
       setConfirmOpen(false);
-      if (openId && ids.includes(openId)) navigate("/contacts", { replace: true });
+      if (openId && ids.includes(openId)) navigate(withQuery({ record: null }), { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete");
     } finally {
@@ -163,7 +171,6 @@ export function ContactsPage({ navigate, openId }: { navigate: (to: string, opts
                 className="h-7 w-56 pl-8"
               />
             </div>
-            <TableFilter fields={filterFields} filters={contactsPag.filters} onChange={setContactsFilters} />
             <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
               <Upload className="size-4" />
               Import
@@ -172,8 +179,29 @@ export function ContactsPage({ navigate, openId }: { navigate: (to: string, opts
           </>
         )}
       </PageHeader>
+      <FilterBar
+        leading={
+          <ViewSwitcher
+            views={listView.views}
+            current={listView.view}
+            count={contactsPag.total}
+            onOpen={listView.open}
+            onCreate={listView.create}
+            onRename={listView.rename}
+            onDelete={listView.remove}
+          />
+        }
+        fields={filterFields}
+        filters={listView.filters}
+        onChange={listView.setFilters}
+        isVisible={view.visible}
+        dirty={listView.dirty}
+        onSave={listView.update}
+        onReset={listView.reset}
+      />
 
-      {contacts.length === 0 ? (
+      {/* The first-run empty state is for an empty list, not a filtered one. */}
+      {contacts.length === 0 && !contactsPag.search && sanitize(listView.filters).length === 0 ? (
         <EmptyState
           title="No contacts yet. Add your first, or import a CSV/XLSX."
           action={

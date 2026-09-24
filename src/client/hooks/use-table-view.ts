@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api";
 import { useCrm } from "@/context";
+import { sanitize, type FilterNode } from "@/lib/filters";
 import type { EntityType } from "@/types";
 
 interface ViewField {
@@ -11,7 +12,7 @@ interface ViewField {
   aggregate: string | null;
 }
 
-/** A named, shared view of a list. Every list has one default ("All contacts"). */
+/** A named, shared view of a list: its filters, sort and columns. Every list has one default ("All contacts"). */
 export interface ListView {
   id: string;
   entity: EntityType;
@@ -19,6 +20,10 @@ export interface ListView {
   icon: string;
   isDefault: boolean;
   position: number;
+  filters: FilterNode[];
+  /** Null: the list's default order. */
+  sort: string | null;
+  order: "asc" | "desc" | null;
 }
 
 // Last layout seen per view, so a list that remounts (back from a record's
@@ -120,9 +125,11 @@ export function useAggregates(path: string, listQuery: string, ops: Array<{ key:
 export type TableView = ReturnType<typeof useTableView>;
 
 /** The part of a list's query the footer totals share: search and filters, no paging. */
-export function listFilterQuery(pag: { search: string; filters: unknown[] }): string {
+export function listFilterQuery(pag: { search: string; filters: FilterNode[] }): string {
   const p = new URLSearchParams();
   if (pag.search) p.set("search", pag.search);
-  if (pag.filters.length) p.set("filters", JSON.stringify(pag.filters));
+  const filters = sanitize(pag.filters);
+  if (filters.length) p.set("filters", JSON.stringify(filters));
+  p.set("tz", String(-new Date().getTimezoneOffset()));
   return p.toString();
 }

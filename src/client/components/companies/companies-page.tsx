@@ -3,7 +3,11 @@ import { Search, Plus, Upload, Trash2, Download, X, ExternalLink } from "lucide-
 import { useCrm } from "@/context";
 import { PageHeader, EntityIcon, CategoryBadge, EmptyState } from "@/components/shared";
 import { CompanyDialog } from "@/components/companies/company-dialog";
-import { TableFilter, fieldsFromDefs } from "@/components/table-filter";
+import { FilterBar } from "@/components/filter-bar";
+import { fieldsFromDefs, sanitize } from "@/lib/filters";
+import { useListView } from "@/hooks/use-list-view";
+import { ViewSwitcher } from "@/components/view-switcher";
+import { withQuery } from "@/hooks/use-router";
 import { ImportDialog } from "@/components/import-dialog";
 import { RecordTable, columnKind, type NameColumn, type RecordColumn } from "@/components/record-table";
 import { companyImportConfig } from "@/lib/import-config";
@@ -17,21 +21,23 @@ import type { Company } from "@/types";
 
 const dash = <span className="text-muted-foreground">—</span>;
 
-// `openId` is the company in the side panel beside the table, as ContactsPage.
-export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string }) {
-  const { companies, companiesPag, stats, setCompaniesPage, setCompaniesSort, setCompaniesSearch, setCompaniesFilters, deleteCompanies, customFields, setError } = useCrm();
+// `openId`, `viewParam` and `filtersParam` as ContactsPage.
+export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; viewParam?: string; filtersParam?: string }) {
+  const { companies, companiesPag, stats, setCompaniesPage, setCompaniesSort, setCompaniesSearch, setCompaniesFilters, setCompaniesView, deleteCompanies, customFields, setError } = useCrm();
   const companyFields = customFields.filter((d) => d.entity_type === "company");
   const filterFields = fieldsFromDefs(
     [
-      { key: "name", label: "Name", type: "text" },
-      { key: "domain", label: "Domain", type: "text" },
-      { key: "industry", label: "Industry", type: "text" },
+      { key: "name", label: "Name", type: "text", column: "name" },
+      { key: "domain", label: "Domain", type: "text", column: "domain" },
+      { key: "industry", label: "Industry", type: "text", column: "industry" },
       { key: "phone", label: "Phone", type: "text" },
       { key: "email", label: "Email", type: "text" },
+      { key: "created_at", label: "Created", type: "date" },
     ],
     companyFields,
   );
-  const view = useTableView("company", undefined, { name: 220, domain: 180, industry: 160, contacts: 112 });
+  const view = useTableView("company", viewParam, { name: 220, domain: 180, industry: 160, contacts: 112 });
+  const listView = useListView({ entity: "company", table: view, filtersParam, pag: companiesPag, setFilters: setCompaniesFilters, setView: setCompaniesView, navigate });
 
   const name: NameColumn<Company> = {
     label: "Name",
@@ -104,7 +110,7 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
     companies,
   );
 
-  const openRecord = (id: string) => navigate(`/companies?record=${encodeURIComponent(id)}`, { replace: !!openId });
+  const openRecord = (id: string) => navigate(withQuery({ record: id }), { replace: !!openId });
   const totalPages = Math.max(1, Math.ceil(companiesPag.total / companiesPag.limit));
 
   const addButton = (
@@ -126,7 +132,7 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
     try {
       await deleteCompanies(ids);
       setConfirmOpen(false);
-      if (openId && ids.includes(openId)) navigate("/companies", { replace: true });
+      if (openId && ids.includes(openId)) navigate(withQuery({ record: null }), { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete");
     } finally {
@@ -165,7 +171,6 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
                 className="h-7 w-56 pl-8"
               />
             </div>
-            <TableFilter fields={filterFields} filters={companiesPag.filters} onChange={setCompaniesFilters} />
             <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
               <Upload className="size-4" />
               Import
@@ -174,8 +179,29 @@ export function CompaniesPage({ navigate, openId }: { navigate: (to: string, opt
           </>
         )}
       </PageHeader>
+      <FilterBar
+        leading={
+          <ViewSwitcher
+            views={listView.views}
+            current={listView.view}
+            count={companiesPag.total}
+            onOpen={listView.open}
+            onCreate={listView.create}
+            onRename={listView.rename}
+            onDelete={listView.remove}
+          />
+        }
+        fields={filterFields}
+        filters={listView.filters}
+        onChange={listView.setFilters}
+        isVisible={view.visible}
+        dirty={listView.dirty}
+        onSave={listView.update}
+        onReset={listView.reset}
+      />
 
-      {companies.length === 0 ? (
+      {/* The first-run empty state is for an empty list, not a filtered one. */}
+      {companies.length === 0 && !companiesPag.search && sanitize(listView.filters).length === 0 ? (
         <EmptyState title="No companies yet. Add your first." action={addButton} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">

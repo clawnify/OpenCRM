@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronUp, Plus, Settings2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -130,7 +130,7 @@ export function RecordTable<T extends { id: string }>({
             </TableHead>
           ))}
           {/* The "+": no rule on its right, so it reads as the end of the columns. */}
-          <TableHead width={44} className="px-1 shadow-[inset_0_-1px_0_var(--border)]">
+          <TableHead width={44} className="px-1 shadow-[inset_0_-1px_0_var(--rule)]">
             <ColumnPicker columns={columns} view={view} onCustomize={onCustomize} />
           </TableHead>
           {/* Takes the slack, so the columns keep their widths. */}
@@ -209,7 +209,7 @@ export function RecordTable<T extends { id: string }>({
   );
 }
 
-const footCell = "sticky bottom-0 z-20 bg-background shadow-[inset_0_1px_0_var(--border)]";
+const footCell = "sticky bottom-0 z-20 bg-background shadow-[inset_0_1px_0_var(--rule)]";
 
 const BASE_AGGREGATES = ["count", "count_empty", "count_not_empty", "count_unique", "percent_empty", "percent_not_empty"];
 const AGGREGATES_FOR: Record<ColumnKind, string[]> = {
@@ -287,8 +287,7 @@ function AggregatePicker({ label, kind, op, value, onChange, alwaysShown = false
                 <CommandItem value="none" onSelect={() => pick(null)} className="text-muted-foreground">None</CommandItem>
               )}
               {AGGREGATES_FOR[kind].map((a) => (
-                <CommandItem key={a} value={a} onSelect={() => pick(a)}>
-                  <Check className={cn("size-3.5", a === op ? "opacity-100" : "opacity-0")} />
+                <CommandItem key={a} value={a} onSelect={() => pick(a)} aria-selected={a === op} className={cn(a === op && "bg-secondary font-medium")}>
                   {AGGREGATE_LABELS[a][0]}
                 </CommandItem>
               ))}
@@ -337,7 +336,7 @@ function ColumnPicker<T>({ columns, view, onCustomize }: { columns: RecordColumn
               <CommandGroup heading="Hidden">
                 {hidden.map((c) => (
                   <CommandItem key={c.key} value={c.label} onSelect={() => view.setVisible(c.key, true)}>
-                    <Plus className="size-3.5 text-muted-foreground" /> {c.label}
+                    {c.label}
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -346,7 +345,7 @@ function ColumnPicker<T>({ columns, view, onCustomize }: { columns: RecordColumn
               <CommandGroup heading="Shown">
                 {shown.map((c) => (
                   <CommandItem key={c.key} value={c.label} onSelect={() => view.setVisible(c.key, false)}>
-                    <Check className="size-3.5" /> {c.label}
+                    {c.label}
                   </CommandItem>
                 ))}
               </CommandGroup>

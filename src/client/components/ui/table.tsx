@@ -5,12 +5,12 @@ import { cn } from "@/lib/utils";
 // `pinned` head + cells hold the first column while the rest scroll sideways.
 // Both need the table's own box to be the scroller, so a table that pins gives
 // that box its height with `containerClassName` rather than sitting inside
-// another scrolling div. Pinned cells are painted (they cover what scrolls
-// under them) and carry their rules as inset shadows, because a collapsed
-// border stays with the row instead of the sticky cell. A grid draws every
-// column rule that way, sticky or not: a collapsed border sits on the cell
-// boundary, 1px right of an inset shadow, so mixing the two misaligns the
-// header's rules with the body's.
+// another scrolling div. Rules use the lighter `--rule` tone. Pinned cells
+// are painted (they cover what scrolls under them) and carry their rules as
+// inset shadows, because a collapsed border stays with the row instead of the
+// sticky cell. A grid draws every column rule that way, sticky or not: a
+// collapsed border sits on the cell boundary, 1px right of an inset shadow, so
+// mixing the two misaligns the header's rules with the body's.
 //
 // Grid (`grid` on Table): the dense record grid. 13px text and 32px rows
 // (44px in agent mode, DESIGN.md's tap target), every column at the width its head is given,
@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
 // is more: give it a last, widthless column and that column takes the slack,
 // so the columns sit at their widths from the left and the row rules run on to
 // the edge. The last column never draws a right rule.
-const pinnedCell = "sticky left-0 z-10 bg-background shadow-[inset_-1px_0_0_var(--border)]";
-const columnRule = "shadow-[inset_-1px_0_0_var(--border)] last:shadow-none";
+const pinnedCell = "sticky left-0 z-10 bg-background shadow-[inset_-1px_0_0_var(--rule)]";
+const columnRule = "shadow-[inset_-1px_0_0_var(--rule)] last:shadow-none";
 const StickyHeader = React.createContext(false);
 const Grid = React.createContext(false);
 
@@ -56,9 +56,16 @@ const TableBody = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes
 TableBody.displayName = "TableBody";
 
 const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTMLTableRowElement>>(
-  ({ className, ...props }, ref) => (
-    <tr ref={ref} className={cn("group border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted", className)} {...props} />
-  ),
+  ({ className, ...props }, ref) => {
+    const grid = React.useContext(Grid);
+    return (
+      <tr
+        ref={ref}
+        className={cn("group border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted", grid && "border-rule", className)}
+        {...props}
+      />
+    );
+  },
 );
 TableRow.displayName = "TableRow";
 
@@ -80,8 +87,8 @@ const TableHead = React.forwardRef<HTMLTableCellElement, HeadProps>(
     // in a grid uses a plain border. The last head gets no right rule.
     const right = grid || pinned;
     const shadow = sticky
-      ? right ? "shadow-[inset_-1px_-1px_0_var(--border)] last:shadow-[inset_0_-1px_0_var(--border)]" : "shadow-[inset_0_-1px_0_var(--border)]"
-      : pinned ? "shadow-[inset_-1px_0_0_var(--border)]" : undefined;
+      ? right ? "shadow-[inset_-1px_-1px_0_var(--rule)] last:shadow-[inset_0_-1px_0_var(--rule)]" : "shadow-[inset_0_-1px_0_var(--rule)]"
+      : pinned ? "shadow-[inset_-1px_0_0_var(--rule)]" : undefined;
     return (
       <th
         ref={ref}

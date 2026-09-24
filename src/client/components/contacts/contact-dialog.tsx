@@ -17,7 +17,7 @@ import { api } from "@/api";
 import { CustomFieldsSection, readCustom } from "@/lib/custom-fields";
 import type { Contact } from "@/types";
 
-const STATUSES = ["lead", "active", "inactive", "churned"] as const;
+export const STATUSES = ["lead", "active", "inactive", "churned"] as const;
 
 // Radix Select forbids an empty-string item value, so we use a sentinel for the
 // "None" company option and map it back to null on submit.

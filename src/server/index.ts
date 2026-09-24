@@ -13,6 +13,7 @@ import {
   missingRequiredCustom,
   writableFieldKeys,
   isEntityType,
+  ENTITY_TABLES,
   type EntityType,
   type CustomFieldDef,
 } from "./custom-fields.js";
@@ -225,7 +226,8 @@ const PaginationQuery = z.object({
   sort: z.string().optional().openapi({ description: "Column to sort by (any real column, incl. custom fields)" }),
   order: z.enum(["asc", "desc"]).optional().openapi({ description: "Sort direction (default: desc)" }),
   search: z.string().optional().openapi({ description: "Search term" }),
-  filters: z.string().optional().openapi({ description: 'JSON array of {field, op, value} — op ∈ contains|is|is_not|is_empty|is_not_empty|gt|lt' }),
+  filters: z.string().optional().openapi({ description: 'JSON filter list, ANDed. Each entry is a rule {field, op, value} or a group {logic: "and"|"or", rules: [...]} (groups nest one level). op ∈ contains|does_not_contain|is|is_not (value may be an array)|is_empty|is_not_empty|gt|gte|lt|lte, and for dates on|before|after (value YYYY-MM-DD, after = on or after)|today|in_past|in_future|relative (value PAST_7_DAY, NEXT_2_WEEK, THIS_1_MONTH: DAY|WEEK|MONTH|YEAR)' }),
+  tz: z.string().optional().openapi({ description: "Viewer's UTC offset in minutes (e.g. 120), for date filters on local days" }),
 });
 
 /** Real column names of a table (from sqlite). Used to validate sort/filter
@@ -237,32 +239,137 @@ async function tableColumns(table: string): Promise<Set<string>> {
 
 const qid = (col: string) => `"${col.replace(/"/g, '""')}"`;
 
-interface Filter { field: string; op: string; value?: string }
+// A filter is a tree. The top level is a list, ANDed: each entry is a rule
+// ({field, op, value}) or a group ({logic: "and"|"or", rules: [...]}). A group
+// may hold rules and one more level of groups. The flat list of rules is the
+// same shape with no groups, so older links keep working.
+type FilterRule = { field?: unknown; op?: unknown; value?: unknown };
+type FilterGroup = { logic?: unknown; rules?: unknown };
 
-/** Build safe WHERE clauses from a JSON filter list. Fields are validated
+/** Filter values past this many would crowd D1's 100 bound parameters per query. */
+const MAX_FILTER_PARAMS = 60;
+
+class FilterError extends Error {}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** "YYYY-MM-DD" of a UTC timestamp shifted to the viewer's offset. */
+function localDay(ms: number, tzOffset: number): string {
+  return new Date(ms + tzOffset * 60_000).toISOString().slice(0, 10);
+}
+
+/** A relative date ("PAST_7_DAY", "NEXT_2_WEEK", "THIS_1_MONTH") as an inclusive
+ *  [start, end] of local days. Weeks start on Monday. */
+function relativeRange(value: string, tzOffset: number): [string, string] | null {
+  const m = /^(PAST|NEXT|THIS)_(\d{1,4})_(DAY|WEEK|MONTH|YEAR)$/.exec(value);
+  if (!m) return null;
+  const [, dir, n, unit] = m;
+  const amount = Number(n);
+  const today = new Date(`${localDay(Date.now(), tzOffset)}T00:00:00Z`);
+  const shift = (d: Date, by: number) => {
+    const x = new Date(d);
+    if (unit === "DAY") x.setUTCDate(x.getUTCDate() + by);
+    else if (unit === "WEEK") x.setUTCDate(x.getUTCDate() + 7 * by);
+    else if (unit === "MONTH") x.setUTCMonth(x.getUTCMonth() + by);
+    else x.setUTCFullYear(x.getUTCFullYear() + by);
+    return x;
+  };
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  if (dir === "PAST") return [day(shift(today, -amount)), day(today)];
+  if (dir === "NEXT") return [day(today), day(shift(today, amount))];
+  const start = new Date(today);
+  if (unit === "WEEK") start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+  else if (unit === "MONTH") start.setUTCDate(1);
+  else if (unit === "YEAR") start.setUTCMonth(0, 1);
+  const end = shift(start, 1);
+  end.setUTCDate(end.getUTCDate() - 1);
+  return [day(start), day(unit === "DAY" ? today : end)];
+}
+
+/** Build safe WHERE clauses from a JSON filter tree. Fields are validated
  *  against `cols` (real columns), so identifiers are never user-controlled;
- *  values are always parameterised. */
-function buildFilters(cols: Set<string>, raw: string | undefined, prefix = ""): { clauses: string[]; params: unknown[] } {
-  const clauses: string[] = [];
+ *  values are always parameterised. `tzOffset` (minutes east of UTC) puts date
+ *  rules on the viewer's local day. Invalid rules are skipped; too many
+ *  values throw a FilterError. */
+function buildFilters(cols: Set<string>, raw: string | undefined, prefix = "", tzOffset = 0): { clauses: string[]; params: unknown[] } {
   const params: unknown[] = [];
-  let filters: Filter[] = [];
-  try { const a = JSON.parse(raw || "[]"); if (Array.isArray(a)) filters = a; } catch { /* ignore */ }
-  for (const f of filters) {
-    if (!f || typeof f.field !== "string" || !cols.has(f.field)) continue;
-    const col = `${prefix}${qid(f.field)}`;
-    const v = f.value ?? "";
-    switch (f.op) {
-      case "contains": clauses.push(`${col} LIKE ?`); params.push(`%${v}%`); break;
-      case "is": clauses.push(`${col} = ?`); params.push(v); break;
-      case "is_not": clauses.push(`(${col} IS NULL OR ${col} != ?)`); params.push(v); break;
-      case "is_empty": clauses.push(`(${col} IS NULL OR ${col} = '')`); break;
-      case "is_not_empty": clauses.push(`(${col} IS NOT NULL AND ${col} != '')`); break;
-      case "gt": clauses.push(`${col} > ?`); params.push(Number(v)); break;
-      case "lt": clauses.push(`${col} < ?`); params.push(Number(v)); break;
-      default: break;
+  let nodes: unknown[] = [];
+  try { const a = JSON.parse(raw || "[]"); if (Array.isArray(a)) nodes = a; } catch { /* ignore */ }
+  const mod = `${tzOffset >= 0 ? "+" : ""}${tzOffset} minutes`;
+
+  // A value's local day: a date-only value is already one; a timestamp is
+  // stored in UTC and shifted to the viewer's offset.
+  const dayOf = (col: string) => {
+    params.push(mod);
+    return `(CASE WHEN length(${col}) <= 10 THEN ${col} ELSE date(${col}, ?) END)`;
+  };
+  const today = () => { params.push(mod); return "date('now', ?)"; };
+
+  const leaf = (r: FilterRule): string | null => {
+    if (typeof r.field !== "string" || !cols.has(r.field) || typeof r.op !== "string") return null;
+    const col = `${prefix}${qid(r.field)}`;
+    const list = Array.isArray(r.value) ? r.value.filter((v): v is string => typeof v === "string") : null;
+    const v = typeof r.value === "string" || typeof r.value === "number" ? String(r.value) : "";
+    const num = Number(v);
+    switch (r.op) {
+      case "contains": if (!v) return null; params.push(`%${v}%`); return `${col} LIKE ?`;
+      case "does_not_contain": if (!v) return null; params.push(`%${v}%`); return `(${col} IS NULL OR ${col} NOT LIKE ?)`;
+      // is / is not ignore case, as contains (LIKE) already does: "consulting" finds "Consulting".
+      case "is":
+        if (list) { if (!list.length) return null; params.push(...list); return `${col} COLLATE NOCASE IN (${list.map(() => "?").join(", ")})`; }
+        params.push(v); return `${col} = ? COLLATE NOCASE`;
+      case "is_not":
+        if (list) { if (!list.length) return null; params.push(...list); return `(${col} IS NULL OR ${col} COLLATE NOCASE NOT IN (${list.map(() => "?").join(", ")}))`; }
+        params.push(v); return `(${col} IS NULL OR ${col} != ? COLLATE NOCASE)`;
+      case "is_empty": return `(${col} IS NULL OR ${col} = '')`;
+      case "is_not_empty": return `(${col} IS NOT NULL AND ${col} != '')`;
+      case "gt": case "lt": case "gte": case "lte": {
+        if (v === "" || Number.isNaN(num)) return null;
+        params.push(num);
+        return `${col} ${({ gt: ">", lt: "<", gte: ">=", lte: "<=" } as const)[r.op]} ?`;
+      }
+      case "on": case "before": case "after": {
+        if (!DAY.test(v)) return null;
+        const d = dayOf(col);
+        params.push(v);
+        return `${d} ${({ on: "=", before: "<", after: ">=" } as const)[r.op]} ?`;
+      }
+      case "today": { const d = dayOf(col); return `${d} = ${today()}`; }
+      case "in_past": return `(${col} IS NOT NULL AND ${col} != '' AND datetime(${col}) < datetime('now'))`;
+      case "in_future": return `(${col} IS NOT NULL AND ${col} != '' AND datetime(${col}) > datetime('now'))`;
+      case "relative": {
+        const range = relativeRange(v, tzOffset);
+        if (!range) return null;
+        const d = dayOf(col);
+        params.push(range[0], range[1]);
+        return `${d} BETWEEN ? AND ?`;
+      }
+      default: return null;
     }
-  }
+  };
+
+  // depth 0: the top-level list; a group there may hold one more level of groups.
+  const node = (n: unknown, depth: number): string | null => {
+    if (!n || typeof n !== "object") return null;
+    const g = n as FilterGroup;
+    if (Array.isArray(g.rules)) {
+      if (depth > 1) return null;
+      const parts = g.rules.map((r) => node(r, depth + 1)).filter((p): p is string => !!p);
+      if (!parts.length) return null;
+      return `(${parts.join(g.logic === "or" ? " OR " : " AND ")})`;
+    }
+    return leaf(n as FilterRule);
+  };
+
+  const clauses = nodes.map((n) => node(n, 0)).filter((c): c is string => !!c);
+  if (params.length > MAX_FILTER_PARAMS) throw new FilterError(`Too many filter values (at most ${MAX_FILTER_PARAMS})`);
   return { clauses, params };
+}
+
+/** The viewer's UTC offset in minutes from a `tz` query value; 0 when absent or invalid. */
+function tzOffsetOf(raw: string | undefined): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && Math.abs(n) <= 840 ? n : 0;
 }
 
 // ── Column aggregates (the list footer's "Calculate" row) ──────────
@@ -396,13 +503,14 @@ const listCompanies = createRoute({
         limit: z.number().int(),
       }) } },
     },
+    400: { description: "Invalid filter", content: { "application/json": { schema: ErrorSchema } } },
     500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
   },
 });
 
 /** The companies list's WHERE: search, industry and filters. Shared by the
  *  list and its footer aggregates, so both see the same rows. */
-function companiesWhere(q: { search?: string; industry?: string; filters?: string }, cols: Set<string>) {
+function companiesWhere(q: { search?: string; industry?: string; filters?: string; tz?: string }, cols: Set<string>) {
   const where: string[] = [];
   const params: unknown[] = [];
   const search = (q.search || "").trim();
@@ -415,7 +523,7 @@ function companiesWhere(q: { search?: string; industry?: string; filters?: strin
     where.push("industry = ?");
     params.push(industry);
   }
-  const flt = buildFilters(cols, q.filters);
+  const flt = buildFilters(cols, q.filters, "", tzOffsetOf(q.tz));
   where.push(...flt.clauses);
   params.push(...flt.params);
   return { whereSQL: where.length ? " WHERE " + where.join(" AND ") : "", params };
@@ -436,7 +544,7 @@ app.get("/api/companies/aggregates", async (c) => {
     }, q.ops);
     return c.json({ values }, 200);
   } catch (err: unknown) {
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
   }
 });
 
@@ -468,7 +576,7 @@ app.openapi(listCompanies, async (c) => {
 
     return c.json({ companies: rows, total, page, limit }, 200);
   } catch (err: unknown) {
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
   }
 });
 
@@ -679,13 +787,14 @@ const listContacts = createRoute({
         limit: z.number().int(),
       }) } },
     },
+    400: { description: "Invalid filter", content: { "application/json": { schema: ErrorSchema } } },
     500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
   },
 });
 
 /** The contacts list's WHERE: search, status, company and filters. Shared by
  *  the list and its footer aggregates, so both see the same rows. */
-function contactsWhere(q: { search?: string; status?: string; company_id?: string; filters?: string }, cols: Set<string>) {
+function contactsWhere(q: { search?: string; status?: string; company_id?: string; filters?: string; tz?: string }, cols: Set<string>) {
   const where: string[] = [];
   const params: unknown[] = [];
   const search = (q.search || "").trim();
@@ -705,7 +814,7 @@ function contactsWhere(q: { search?: string; status?: string; company_id?: strin
     where.push("ct.company_id = ?");
     params.push(companyId);
   }
-  const flt = buildFilters(cols, q.filters, "ct.");
+  const flt = buildFilters(cols, q.filters, "ct.", tzOffsetOf(q.tz));
   where.push(...flt.clauses);
   params.push(...flt.params);
   return { whereSQL: where.length ? " WHERE " + where.join(" AND ") : "", params };
@@ -728,7 +837,7 @@ app.get("/api/contacts/aggregates", async (c) => {
     }, q.ops);
     return c.json({ values }, 200);
   } catch (err: unknown) {
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
   }
 });
 
@@ -764,7 +873,7 @@ app.openapi(listContacts, async (c) => {
 
     return c.json({ contacts: rows, total, page, limit }, 200);
   } catch (err: unknown) {
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
   }
 });
 
@@ -2077,8 +2186,37 @@ app.delete("/api/custom-fields/:id", async (c) => {
 const VIEW_FIELD_KEY = /^[a-z][a-z0-9_]*$/;
 const DEFAULT_VIEW_NAMES: Record<EntityType, string> = { contact: "All contacts", company: "All companies", deal: "All deals" };
 
-interface ViewRow { id: string; entity_type: string; name: string; icon: string; is_default: number; position: number }
-const viewJson = (v: ViewRow) => ({ id: v.id, entity: v.entity_type, name: v.name, icon: v.icon, isDefault: v.is_default === 1, position: v.position });
+interface ViewRow {
+  id: string; entity_type: string; name: string; icon: string; is_default: number; position: number;
+  filters: string; sort: string | null; sort_order: string | null;
+}
+const viewJson = (v: ViewRow) => {
+  let filters: unknown = [];
+  try { filters = JSON.parse(v.filters || "[]"); } catch { /* a bad row reads as no filters */ }
+  return {
+    id: v.id, entity: v.entity_type, name: v.name, icon: v.icon, isDefault: v.is_default === 1, position: v.position,
+    filters: Array.isArray(filters) ? filters : [], sort: v.sort, order: v.sort_order === "asc" ? "asc" : v.sort_order === "desc" ? "desc" : null,
+  };
+};
+
+/** A view name: trimmed, 1–60 characters. */
+function viewName(raw: unknown): string | null {
+  const name = typeof raw === "string" ? raw.trim() : "";
+  return name && name.length <= 60 ? name : null;
+}
+
+/** Validates a view's filters by compiling them against the list's real columns; the JSON to store, or an error. */
+async function viewFilters(entity: EntityType, raw: unknown): Promise<{ json: string } | { error: string }> {
+  if (!Array.isArray(raw)) return { error: "filters must be an array" };
+  const json = JSON.stringify(raw);
+  if (json.length > 20_000) return { error: "filters too large" };
+  try {
+    buildFilters(await tableColumns(ENTITY_TABLES[entity]), json);
+  } catch (err: unknown) {
+    return { error: (err as Error).message };
+  }
+  return { json };
+}
 
 /** The list's default view, created on first use. */
 async function ensureDefaultView(entity: EntityType): Promise<ViewRow> {
@@ -2142,6 +2280,77 @@ app.put("/api/views/:id/fields/:key", async (c) => {
     [id, key, visible ? 1 : 0, size, aggregate],
   );
   return c.json({ field: { key, visible, size, aggregate } }, 200);
+});
+
+// Creates a view from the list's current state: its filters and sort, and
+// the columns of the view it was made from (`from`).
+app.post("/api/views", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { entity?: unknown; name?: unknown; from?: unknown; filters?: unknown; sort?: unknown; order?: unknown };
+  const entity = typeof body.entity === "string" ? body.entity : "";
+  if (!isEntityType(entity)) return c.json({ error: "Invalid entity" }, 400);
+  const name = viewName(body.name);
+  if (!name) return c.json({ error: "A view needs a name of up to 60 characters" }, 400);
+  const f = await viewFilters(entity, body.filters ?? []);
+  if ("error" in f) return c.json({ error: f.error }, 400);
+  const sort = typeof body.sort === "string" && VIEW_FIELD_KEY.test(body.sort) ? body.sort : null;
+  const order = body.order === "asc" || body.order === "desc" ? body.order : null;
+  await ensureDefaultView(entity);
+  const last = await get<{ p: number | null }>("SELECT MAX(position) as p FROM views WHERE entity_type = ?", [entity]);
+  const id = crypto.randomUUID();
+  await run(
+    "INSERT INTO views (id, entity_type, name, icon, is_default, position, filters, sort, sort_order) VALUES (?, ?, ?, 'table', 0, ?, ?, ?, ?)",
+    [id, entity, name, (last?.p ?? 0) + 1, f.json, sort, order],
+  );
+  if (typeof body.from === "string") {
+    await run(
+      `INSERT INTO view_fields (view_id, field_key, is_visible, size, aggregate)
+       SELECT ?, field_key, is_visible, size, aggregate FROM view_fields
+       WHERE view_id = (SELECT id FROM views WHERE id = ? AND entity_type = ?)`,
+      [id, body.from, entity],
+    );
+  }
+  const row = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
+  return c.json({ view: viewJson(row!) }, 201);
+});
+
+// Renames a view, or updates its filters and sort (the "Update view" button).
+app.patch("/api/views/:id", async (c) => {
+  const id = c.req.param("id");
+  const prev = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
+  if (!prev) return c.json({ error: "View not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as { name?: unknown; filters?: unknown; sort?: unknown; order?: unknown };
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (body.name !== undefined) {
+    const name = viewName(body.name);
+    if (!name) return c.json({ error: "A view needs a name of up to 60 characters" }, 400);
+    sets.push("name = ?"); params.push(name);
+  }
+  if (body.filters !== undefined) {
+    const f = await viewFilters(prev.entity_type as EntityType, body.filters);
+    if ("error" in f) return c.json({ error: f.error }, 400);
+    sets.push("filters = ?"); params.push(f.json);
+  }
+  if (body.sort !== undefined) {
+    sets.push("sort = ?"); params.push(typeof body.sort === "string" && VIEW_FIELD_KEY.test(body.sort) ? body.sort : null);
+  }
+  if (body.order !== undefined) {
+    sets.push("sort_order = ?"); params.push(body.order === "asc" || body.order === "desc" ? body.order : null);
+  }
+  if (sets.length) await run(`UPDATE views SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ?`, [...params, id]);
+  const row = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
+  return c.json({ view: viewJson(row!) }, 200);
+});
+
+// Deletes a view for everyone. The list's default view stays.
+app.delete("/api/views/:id", async (c) => {
+  const id = c.req.param("id");
+  const prev = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
+  if (!prev) return c.json({ error: "View not found" }, 404);
+  if (prev.is_default === 1) return c.json({ error: "The default view can't be deleted" }, 400);
+  await run("DELETE FROM view_fields WHERE view_id = ?", [id]);
+  await run("DELETE FROM views WHERE id = ?", [id]);
+  return c.json({ ok: true }, 200);
 });
 
 export default app;
