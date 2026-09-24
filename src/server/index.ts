@@ -2279,12 +2279,17 @@ interface ViewRow {
   id: string; entity_type: string; name: string; icon: string; is_default: number; position: number;
   filters: string; sort: string | null; sort_order: string | null;
 }
+// The default view ("All contacts") is the whole list: it holds no filters or
+// sort, and reads that way even if a row from before the lock holds some.
 const viewJson = (v: ViewRow) => {
+  const isDefault = v.is_default === 1;
   let filters: unknown = [];
   try { filters = JSON.parse(v.filters || "[]"); } catch { /* a bad row reads as no filters */ }
   return {
-    id: v.id, entity: v.entity_type, name: v.name, icon: v.icon, isDefault: v.is_default === 1, position: v.position,
-    filters: Array.isArray(filters) ? filters : [], sort: v.sort, order: v.sort_order === "asc" ? "asc" : v.sort_order === "desc" ? "desc" : null,
+    id: v.id, entity: v.entity_type, name: v.name, icon: v.icon, isDefault, position: v.position,
+    filters: !isDefault && Array.isArray(filters) ? filters : [],
+    sort: isDefault ? null : v.sort,
+    order: isDefault ? null : v.sort_order === "asc" ? "asc" : v.sort_order === "desc" ? "desc" : null,
   };
 };
 
@@ -2408,6 +2413,9 @@ app.patch("/api/views/:id", async (c) => {
   const prev = await get<ViewRow>("SELECT * FROM views WHERE id = ?", [id]);
   if (!prev) return c.json({ error: "View not found" }, 404);
   const body = (await c.req.json().catch(() => ({}))) as { name?: unknown; filters?: unknown; sort?: unknown; order?: unknown };
+  if (prev.is_default === 1 && (body.filters !== undefined || body.sort !== undefined || body.order !== undefined)) {
+    return c.json({ error: `"${prev.name}" is the whole list and is locked: save the filters and sort as a new view instead (POST /api/views)` }, 400);
+  }
   const sets: string[] = [];
   const params: unknown[] = [];
   if (body.name !== undefined) {
