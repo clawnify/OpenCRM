@@ -143,8 +143,8 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     await fetchContacts(contactsPag);
   }, [contactsPag, fetchContacts]);
 
-  const deleteContact = useCallback(async (id: string) => {
-    await api("DELETE", `/api/contacts/${id}`);
+  const deleteContacts = useCallback(async (ids: string[]) => {
+    await api("POST", "/api/contacts/bulk-delete", { ids });
     await Promise.all([fetchContacts(contactsPag), fetchStats()]);
   }, [contactsPag, fetchContacts, fetchStats]);
 
@@ -178,8 +178,8 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     await fetchCompanies(companiesPag);
   }, [companiesPag, fetchCompanies]);
 
-  const deleteCompany = useCallback(async (id: string) => {
-    await api("DELETE", `/api/companies/${id}`);
+  const deleteCompanies = useCallback(async (ids: string[]) => {
+    await api("POST", "/api/companies/bulk-delete", { ids });
     await Promise.all([fetchCompanies(companiesPag), fetchStats()]);
   }, [companiesPag, fetchCompanies, fetchStats]);
 
@@ -244,9 +244,9 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
   return {
     isAgent, stats,
     contacts, contactsPag, setContactsPage: cSet.setPage, setContactsSort: cSet.setSort, setContactsSearch: cSet.setSearch, setContactsFilters: cSet.setFilters,
-    addContact, updateContact, deleteContact, fetchContact, fetchCompany,
+    addContact, updateContact, deleteContacts, fetchContact, fetchCompany,
     companies, companiesPag, setCompaniesPage: coSet.setPage, setCompaniesSort: coSet.setSort, setCompaniesSearch: coSet.setSearch, setCompaniesFilters: coSet.setFilters,
-    addCompany, updateCompany, deleteCompany,
+    addCompany, updateCompany, deleteCompanies,
     deals, dealsPag, dealsTotalValue, setDealsPage: dSet.setPage, setDealsSort: dSet.setSort, setDealsSearch: dSet.setSearch,
     addDeal, updateDeal, deleteDeal, boardDeals,
     connections, emailContact, scheduleMeeting,

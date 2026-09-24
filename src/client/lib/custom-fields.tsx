@@ -82,7 +82,7 @@ function Pill({ value }: { value: string }) {
   return (
     <span
       title={value}
-      className={cn("inline-block max-w-[10rem] truncate rounded-full px-2.5 py-1 align-middle text-xs font-medium", c.bg, c.text)}
+      className={cn("inline-block h-5 max-w-[10rem] truncate rounded-full px-2 align-middle text-[0.8125rem] font-medium leading-5", c.bg, c.text)}
     >
       {value}
     </span>

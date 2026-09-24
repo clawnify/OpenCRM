@@ -265,6 +265,77 @@ function buildFilters(cols: Set<string>, raw: string | undefined, prefix = ""): 
   return { clauses, params };
 }
 
+// ── Column aggregates (the list footer's "Calculate" row) ──────────
+// The footer's operations: every column can count; numbers also sum,
+// average and range; dates give the earliest and latest; booleans count each
+// side. Computed over the whole filtered list, not the page on screen.
+
+type ColumnKind = "text" | "number" | "date" | "boolean";
+const BASE_AGGREGATES = ["count", "count_empty", "count_not_empty", "count_unique", "percent_empty", "percent_not_empty"];
+const AGGREGATES_FOR: Record<ColumnKind, string[]> = {
+  text: BASE_AGGREGATES,
+  number: [...BASE_AGGREGATES, "sum", "avg", "min", "max"],
+  date: [...BASE_AGGREGATES, "earliest", "latest"],
+  boolean: [...BASE_AGGREGATES, "count_true", "count_false"],
+};
+const ALL_AGGREGATES = new Set(Object.values(AGGREGATES_FOR).flat());
+
+function kindOf(fieldType: string): ColumnKind {
+  if (fieldType === "integer" || fieldType === "decimal") return "number";
+  if (fieldType === "date" || fieldType === "datetime") return "date";
+  if (fieldType === "boolean") return "boolean";
+  return "text";
+}
+
+function aggregateSQL(op: string, x: string): string {
+  const empty = `(${x} IS NULL OR ${x} = '')`;
+  switch (op) {
+    case "count": return "COUNT(*)";
+    case "count_empty": return `SUM(CASE WHEN ${empty} THEN 1 ELSE 0 END)`;
+    case "count_not_empty": return `SUM(CASE WHEN ${empty} THEN 0 ELSE 1 END)`;
+    case "count_unique": return `COUNT(DISTINCT NULLIF(${x}, ''))`;
+    case "percent_empty": return `ROUND(100.0 * SUM(CASE WHEN ${empty} THEN 1 ELSE 0 END) / MAX(COUNT(*), 1))`;
+    case "percent_not_empty": return `ROUND(100.0 * SUM(CASE WHEN ${empty} THEN 0 ELSE 1 END) / MAX(COUNT(*), 1))`;
+    case "sum": return `SUM(${x})`;
+    case "avg": return `ROUND(AVG(${x}), 2)`;
+    case "min": return `MIN(${x})`;
+    case "max": return `MAX(${x})`;
+    case "earliest": return `MIN(NULLIF(${x}, ''))`;
+    case "latest": return `MAX(NULLIF(${x}, ''))`;
+    case "count_true": return `SUM(CASE WHEN ${x} = 1 THEN 1 ELSE 0 END)`;
+    case "count_false": return `SUM(CASE WHEN ${x} = 0 THEN 1 ELSE 0 END)`;
+    default: throw new Error(`Unknown aggregate ${op}`);
+  }
+}
+
+/** Runs the requested `ops` ([{key, op}] as JSON) in one query over `from` +
+ *  `whereSQL`. Only keys in `columns` and ops valid for their kind are run;
+ *  anything else (a deleted field, a sum of text) is left out of the answer. */
+async function aggregateColumns(
+  from: string,
+  whereSQL: string,
+  params: unknown[],
+  columns: Record<string, { sql: string; kind: ColumnKind }>,
+  raw: string | undefined,
+): Promise<Record<string, number | string | null>> {
+  let asked: Array<{ key?: unknown; op?: unknown }> = [];
+  try { const a = JSON.parse(raw || "[]"); if (Array.isArray(a)) asked = a.slice(0, 50); } catch { /* ignore */ }
+  const valid = asked.filter((a): a is { key: string; op: string } =>
+    typeof a.key === "string" && typeof a.op === "string" && !!columns[a.key] && AGGREGATES_FOR[columns[a.key].kind].includes(a.op));
+  if (!valid.length) return {};
+  const select = valid.map((a, i) => `${aggregateSQL(a.op, columns[a.key].sql)} AS a${i}`).join(", ");
+  const row = await get<Record<string, number | string | null>>(`SELECT ${select} FROM ${from}${whereSQL}`, params);
+  return Object.fromEntries(valid.map((a, i) => [a.key, row?.[`a${i}`] ?? null]));
+}
+
+/** A custom field's column for aggregates, if the field still has one. */
+async function customAggregateColumns(entity: EntityType, alias: string, cols: Set<string>) {
+  const defs = await listDefs(entity);
+  return Object.fromEntries(
+    defs.filter((d) => cols.has(d.key)).map((d) => [d.key, { sql: `${alias}.${qid(d.key)}`, kind: kindOf(d.field_type) }]),
+  );
+}
+
 // ── Stats ──────────────────────────────────────────────────────────
 
 const getStats = createRoute({
@@ -329,37 +400,59 @@ const listCompanies = createRoute({
   },
 });
 
+/** The companies list's WHERE: search, industry and filters. Shared by the
+ *  list and its footer aggregates, so both see the same rows. */
+function companiesWhere(q: { search?: string; industry?: string; filters?: string }, cols: Set<string>) {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  const search = (q.search || "").trim();
+  const industry = (q.industry || "").trim();
+  if (search) {
+    where.push("(name LIKE ? OR domain LIKE ? OR email LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  if (industry) {
+    where.push("industry = ?");
+    params.push(industry);
+  }
+  const flt = buildFilters(cols, q.filters);
+  where.push(...flt.clauses);
+  params.push(...flt.params);
+  return { whereSQL: where.length ? " WHERE " + where.join(" AND ") : "", params };
+}
+
+// Registered before /api/companies/{id}, which would otherwise take "aggregates" as an id.
+app.get("/api/companies/aggregates", async (c) => {
+  try {
+    const q = c.req.query();
+    const cols = await tableColumns("companies");
+    const { whereSQL, params } = companiesWhere(q, cols);
+    const values = await aggregateColumns("companies c", whereSQL, params, {
+      name: { sql: "c.name", kind: "text" },
+      domain: { sql: "c.domain", kind: "text" },
+      industry: { sql: "c.industry", kind: "text" },
+      contacts: { sql: "(SELECT COUNT(*) FROM contacts WHERE company_id = c.id)", kind: "number" },
+      ...(await customAggregateColumns("company", "c", cols)),
+    }, q.ops);
+    return c.json({ values }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 app.openapi(listCompanies, async (c) => {
   try {
     const q = c.req.valid("query");
     const page = Math.max(1, parseInt(q.page || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(q.limit || "25", 10)));
     const offset = (page - 1) * limit;
-    const search = (q.search || "").trim();
-    const industry = (q.industry || "").trim();
-
     const cols = await tableColumns("companies");
     let sortCol = q.sort || "id";
     if (!cols.has(sortCol)) sortCol = "id";
     let order = (q.order || "desc").toLowerCase();
     if (order !== "asc" && order !== "desc") order = "desc";
 
-    const where: string[] = [];
-    const params: unknown[] = [];
-
-    if (search) {
-      where.push("(name LIKE ? OR domain LIKE ? OR email LIKE ?)");
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
-    }
-    if (industry) {
-      where.push("industry = ?");
-      params.push(industry);
-    }
-    const flt = buildFilters(cols, q.filters);
-    where.push(...flt.clauses);
-    params.push(...flt.params);
-
-    const whereSQL = where.length ? " WHERE " + where.join(" AND ") : "";
+    const { whereSQL, params } = companiesWhere(q, cols);
 
     const countResult = await get<{ total: number }>(
       "SELECT COUNT(*) as total FROM companies" + whereSQL,
@@ -529,6 +622,40 @@ app.openapi(deleteCompany, async (c) => {
   }
 });
 
+// Deletes many at once: the table's selection bar. Chunked under D1's
+// 100-parameter cap; not one transaction, so a failure mid-way leaves the
+// earlier chunks deleted (the list refetches either way).
+const bulkDeleteCompanies = createRoute({
+  method: "post",
+  path: "/api/companies/bulk-delete",
+  tags: ["Companies"],
+  summary: "Delete several companies",
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: z.object({ ids: z.array(z.string().min(1)).min(1).max(500) }) } },
+    },
+  },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.number() }) } } },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(bulkDeleteCompanies, async (c) => {
+  try {
+    const { ids } = c.req.valid("json");
+    let deleted = 0;
+    for (const part of chunk([...new Set(ids)], 90)) {
+      const result = await run(`DELETE FROM companies WHERE id IN (${part.map(() => "?").join(", ")})`, part);
+      deleted += result.changes;
+    }
+    return c.json({ deleted }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 // ── Contacts ───────────────────────────────────────────────────────
 
 const listContacts = createRoute({
@@ -556,44 +683,68 @@ const listContacts = createRoute({
   },
 });
 
+/** The contacts list's WHERE: search, status, company and filters. Shared by
+ *  the list and its footer aggregates, so both see the same rows. */
+function contactsWhere(q: { search?: string; status?: string; company_id?: string; filters?: string }, cols: Set<string>) {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  const search = (q.search || "").trim();
+  const status = (q.status || "").trim();
+  const companyId = q.company_id || "";
+  if (search) {
+    // Match the contact's own fields OR their company name, so searching a
+    // company surfaces its contacts (both queries LEFT JOIN companies as `co`).
+    where.push("(ct.first_name LIKE ? OR ct.last_name LIKE ? OR ct.email LIKE ? OR ct.title LIKE ? OR co.name LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  if (status) {
+    where.push("ct.status = ?");
+    params.push(status);
+  }
+  if (companyId) {
+    where.push("ct.company_id = ?");
+    params.push(companyId);
+  }
+  const flt = buildFilters(cols, q.filters, "ct.");
+  where.push(...flt.clauses);
+  params.push(...flt.params);
+  return { whereSQL: where.length ? " WHERE " + where.join(" AND ") : "", params };
+}
+
+// Registered before /api/contacts/{id}, which would otherwise take "aggregates" as an id.
+app.get("/api/contacts/aggregates", async (c) => {
+  try {
+    const q = c.req.query();
+    const cols = await tableColumns("contacts");
+    const { whereSQL, params } = contactsWhere(q, cols);
+    const values = await aggregateColumns("contacts ct LEFT JOIN companies co ON ct.company_id = co.id", whereSQL, params, {
+      name: { sql: "TRIM(COALESCE(ct.first_name, '') || ' ' || COALESCE(ct.last_name, ''))", kind: "text" },
+      email: { sql: "ct.email", kind: "text" },
+      phone: { sql: "ct.phone", kind: "text" },
+      company: { sql: "ct.company_id", kind: "text" },
+      title: { sql: "ct.title", kind: "text" },
+      status: { sql: "ct.status", kind: "text" },
+      ...(await customAggregateColumns("contact", "ct", cols)),
+    }, q.ops);
+    return c.json({ values }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 app.openapi(listContacts, async (c) => {
   try {
     const q = c.req.valid("query");
     const page = Math.max(1, parseInt(q.page || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(q.limit || "25", 10)));
     const offset = (page - 1) * limit;
-    const search = (q.search || "").trim();
-    const status = (q.status || "").trim();
-    const companyId = q.company_id || "";
-
     const cols = await tableColumns("contacts");
     let sortCol = q.sort || "id";
     if (!cols.has(sortCol)) sortCol = "id";
     let order = (q.order || "desc").toLowerCase();
     if (order !== "asc" && order !== "desc") order = "desc";
 
-    const where: string[] = [];
-    const params: unknown[] = [];
-
-    if (search) {
-      // Match the contact's own fields OR their company name, so searching a
-      // company surfaces its contacts (both queries LEFT JOIN companies as `co`).
-      where.push("(ct.first_name LIKE ? OR ct.last_name LIKE ? OR ct.email LIKE ? OR ct.title LIKE ? OR co.name LIKE ?)");
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
-    }
-    if (status) {
-      where.push("ct.status = ?");
-      params.push(status);
-    }
-    if (companyId) {
-      where.push("ct.company_id = ?");
-      params.push(companyId);
-    }
-    const flt = buildFilters(cols, q.filters, "ct.");
-    where.push(...flt.clauses);
-    params.push(...flt.params);
-
-    const whereSQL = where.length ? " WHERE " + where.join(" AND ") : "";
+    const { whereSQL, params } = contactsWhere(q, cols);
 
     const countResult = await get<{ total: number }>(
       "SELECT COUNT(*) as total FROM contacts ct LEFT JOIN companies co ON ct.company_id = co.id" + whereSQL,
@@ -787,6 +938,40 @@ app.openapi(deleteContact, async (c) => {
     const result = await run("DELETE FROM contacts WHERE id = ?", [id]);
     if (result.changes === 0) return c.json({ error: "Contact not found" }, 404);
     return c.json({ ok: true }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// Deletes many at once: the table's selection bar. Chunked under D1's
+// 100-parameter cap; not one transaction, so a failure mid-way leaves the
+// earlier chunks deleted (the list refetches either way).
+const bulkDeleteContacts = createRoute({
+  method: "post",
+  path: "/api/contacts/bulk-delete",
+  tags: ["Contacts"],
+  summary: "Delete several contacts",
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: z.object({ ids: z.array(z.string().min(1)).min(1).max(500) }) } },
+    },
+  },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.number() }) } } },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(bulkDeleteContacts, async (c) => {
+  try {
+    const { ids } = c.req.valid("json");
+    let deleted = 0;
+    for (const part of chunk([...new Set(ids)], 90)) {
+      const result = await run(`DELETE FROM contacts WHERE id IN (${part.map(() => "?").join(", ")})`, part);
+      deleted += result.changes;
+    }
+    return c.json({ deleted }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -1885,6 +2070,78 @@ app.delete("/api/custom-fields/:id", async (c) => {
   const ok = await deleteDef(c.req.param("id"));
   if (!ok) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true }, 200);
+});
+
+// ── Views (a list's named, shared layouts) ─────────────────────────
+
+const VIEW_FIELD_KEY = /^[a-z][a-z0-9_]*$/;
+const DEFAULT_VIEW_NAMES: Record<EntityType, string> = { contact: "All contacts", company: "All companies", deal: "All deals" };
+
+interface ViewRow { id: string; entity_type: string; name: string; icon: string; is_default: number; position: number }
+const viewJson = (v: ViewRow) => ({ id: v.id, entity: v.entity_type, name: v.name, icon: v.icon, isDefault: v.is_default === 1, position: v.position });
+
+/** The list's default view, created on first use. */
+async function ensureDefaultView(entity: EntityType): Promise<ViewRow> {
+  const find = () => get<ViewRow>("SELECT * FROM views WHERE entity_type = ? AND is_default = 1", [entity]);
+  const found = await find();
+  if (found) return found;
+  // The unique default index turns a racing second insert into a no-op.
+  await run(
+    "INSERT OR IGNORE INTO views (id, entity_type, name, icon, is_default, position) VALUES (?, ?, ?, 'table', 1, 0)",
+    [crypto.randomUUID(), entity, DEFAULT_VIEW_NAMES[entity]],
+  );
+  return (await find())!;
+}
+
+app.get("/api/views", async (c) => {
+  const entity = c.req.query("entity") ?? "";
+  if (!isEntityType(entity)) return c.json({ error: "Invalid entity" }, 400);
+  await ensureDefaultView(entity);
+  const views = await query<ViewRow>(
+    "SELECT * FROM views WHERE entity_type = ? ORDER BY is_default DESC, position, created_at",
+    [entity],
+  );
+  return c.json({ views: views.map(viewJson) }, 200);
+});
+
+app.get("/api/views/:id/fields", async (c) => {
+  const id = c.req.param("id");
+  if (!(await get("SELECT id FROM views WHERE id = ?", [id]))) return c.json({ error: "View not found" }, 404);
+  const fields = await query<{ field_key: string; is_visible: number; size: number | null; aggregate: string | null }>(
+    "SELECT field_key, is_visible, size, aggregate FROM view_fields WHERE view_id = ?",
+    [id],
+  );
+  return c.json({ fields: fields.map((f) => ({ key: f.field_key, visible: f.is_visible === 1, size: f.size, aggregate: f.aggregate })) }, 200);
+});
+
+// Sets one column's visibility, width and/or footer aggregate in a view,
+// keeping whatever isn't sent. `aggregate: null` clears the calculation.
+app.put("/api/views/:id/fields/:key", async (c) => {
+  const { id, key } = c.req.param();
+  if (!(await get("SELECT id FROM views WHERE id = ?", [id]))) return c.json({ error: "View not found" }, 404);
+  if (!VIEW_FIELD_KEY.test(key)) return c.json({ error: "Invalid key" }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as { visible?: unknown; size?: unknown; aggregate?: unknown };
+  if (body.visible !== undefined && typeof body.visible !== "boolean") return c.json({ error: "visible must be a boolean" }, 400);
+  if (body.size !== undefined && (typeof body.size !== "number" || !Number.isInteger(body.size) || body.size < 40 || body.size > 2000)) {
+    return c.json({ error: "size must be an integer between 40 and 2000" }, 400);
+  }
+  if (body.aggregate !== undefined && body.aggregate !== null && !(typeof body.aggregate === "string" && ALL_AGGREGATES.has(body.aggregate))) {
+    return c.json({ error: "Unknown aggregate" }, 400);
+  }
+  const prev = await get<{ is_visible: number; size: number | null; aggregate: string | null }>(
+    "SELECT is_visible, size, aggregate FROM view_fields WHERE view_id = ? AND field_key = ?",
+    [id, key],
+  );
+  const visible = body.visible ?? (prev ? prev.is_visible === 1 : true);
+  const size = (body.size as number | undefined) ?? prev?.size ?? null;
+  const aggregate = body.aggregate === undefined ? prev?.aggregate ?? null : (body.aggregate as string | null);
+  await run(
+    `INSERT INTO view_fields (view_id, field_key, is_visible, size, aggregate, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(view_id, field_key) DO UPDATE SET is_visible = excluded.is_visible, size = excluded.size,
+       aggregate = excluded.aggregate, updated_at = excluded.updated_at`,
+    [id, key, visible ? 1 : 0, size, aggregate],
+  );
+  return c.json({ field: { key, visible, size, aggregate } }, 200);
 });
 
 export default app;

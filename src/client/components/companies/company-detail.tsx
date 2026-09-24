@@ -5,6 +5,7 @@ import { EntityIcon, CategoryBadge } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { InlineField } from "@/components/ui/inline-field";
 import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection } from "@/components/record-page";
+import { cn } from "@/lib/utils";
 import type { Company, Activity } from "@/types";
 
 function formatTimestamp(createdAt: string): string {
@@ -14,8 +15,9 @@ function formatTimestamp(createdAt: string): string {
 
 // The company record page: same anatomy as a contact (DESIGN.md → Record
 // pages), with the company's own attributes and tiles. Every value is the
-// control; there is no edit mode.
-export function CompanyDetail({ id, navigate }: { id: string; navigate: (to: string) => void }) {
+// control; there is no edit mode. `panel` renders it in the side panel beside
+// the companies list, as ContactDetail does.
+export function CompanyDetail({ id, navigate, panel = false }: { id: string; navigate: (to: string) => void; panel?: boolean }) {
   const { fetchCompany, updateCompany, fetchActivities, setError } = useCrm();
   const [company, setCompany] = useState<Company | null | undefined>(undefined);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -58,10 +60,10 @@ export function CompanyDetail({ id, navigate }: { id: string; navigate: (to: str
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <RecordTopBar onClose={() => navigate("/companies")} crumb="Companies" />
+      {!panel && <RecordTopBar onClose={() => navigate("/companies")} crumb="Companies" />}
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[31.25rem] shrink-0 flex-col overflow-y-auto border-r border-border">
+      <div className={cn("flex min-h-0 flex-1", panel && "flex-col overflow-y-auto")}>
+        <aside className={cn("flex shrink-0 flex-col", !panel && "w-[31.25rem] overflow-y-auto border-r border-border")}>
           <div className="flex items-center gap-3 px-4 pt-4">
             <EntityIcon name={company.name} domain={company.domain} className="size-9 rounded-md text-sm" />
             <div className="min-w-0 flex-1">
@@ -72,7 +74,7 @@ export function CompanyDetail({ id, navigate }: { id: string; navigate: (to: str
 
           <div className="flex flex-wrap gap-2 px-4 pt-3 pb-4">
             <Button variant="outline" size="sm" disabled={!company.email} asChild={!!company.email}>
-              {company.email ? <a href={`mailto:${company.email}`}><Mail className="size-4" /> Compose email</a> : <span><Mail className="size-4" /> Compose email</span>}
+              {company.email ? <a href={`mailto:${company.email}`}><Mail className="size-4" /> Compose email</a> : <><Mail className="size-4" /> Compose email</>}
             </Button>
             <Button variant="outline" size="sm" onClick={() => navigate(`/contacts?company=${encodeURIComponent(company.id)}`)}>
               <Users className="size-4" /> Contacts {company.contact_count ? <span className="rounded-xs bg-secondary px-1.5 text-xs tabular text-muted-foreground">{company.contact_count}</span> : null}
@@ -109,28 +111,30 @@ export function CompanyDetail({ id, navigate }: { id: string; navigate: (to: str
           </DetailsSection>
         </aside>
 
-        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <RecordTabs tabs={[
+        <main className={cn("flex min-w-0 flex-col", panel ? "shrink-0 border-t border-border" : "flex-1 overflow-y-auto")}>
+          {!panel && <RecordTabs tabs={[
             { key: "overview", label: "Overview", icon: LayoutGrid },
             { key: "activity", label: "Activity", icon: ActivityIcon, count: activities.length },
             { key: "emails", label: "Emails", icon: Mail, count: emailCount },
             { key: "team", label: "Team", icon: Users, count: company.contact_count ?? 0 },
             { key: "notes", label: "Notes", icon: StickyNote, count: noteCount },
             { key: "tasks", label: "Tasks", icon: CheckSquare, count: 0 },
-          ]} />
+          ]} />}
 
-          <div className="flex flex-col gap-8 p-6">
-            <section className="flex flex-col gap-3">
-              <h2 className="text-sm font-medium">Highlights</h2>
-              <div className="grid grid-cols-3 gap-3">
-                <Tile icon={Globe} label="Domain" empty="No domain" value={host && <a href={`https://${host}`} target="_blank" rel="noreferrer" className="text-info hover:underline">{host}</a>} />
-                <Tile icon={Users} label="Team" empty="No team" value={company.contact_count ? `${company.contact_count} ${company.contact_count === 1 ? "person" : "people"}` : undefined} />
-                <Tile icon={Tag} label="Industry" empty="No industry" value={company.industry} />
-                <Tile icon={AtSign} label="Email" empty="No email address" value={company.email} />
-                <Tile icon={Clock} label="Last activity" empty="No activity" value={recent[0] ? formatTimestamp(recent[0].created_at) : undefined} />
-                <Tile icon={Calendar} label="Created" empty="Unknown" value={formatTimestamp(company.created_at)} />
-              </div>
-            </section>
+          <div className={cn("flex flex-col gap-8", panel ? "p-4" : "p-6")}>
+            {!panel && (
+              <section className="flex flex-col gap-3">
+                <h2 className="text-sm font-medium">Highlights</h2>
+                <div className="grid grid-cols-3 gap-3">
+                  <Tile icon={Globe} label="Domain" empty="No domain" value={host && <a href={`https://${host}`} target="_blank" rel="noreferrer" className="text-info hover:underline">{host}</a>} />
+                  <Tile icon={Users} label="Team" empty="No team" value={company.contact_count ? `${company.contact_count} ${company.contact_count === 1 ? "person" : "people"}` : undefined} />
+                  <Tile icon={Tag} label="Industry" empty="No industry" value={company.industry} />
+                  <Tile icon={AtSign} label="Email" empty="No email address" value={company.email} />
+                  <Tile icon={Clock} label="Last activity" empty="No activity" value={recent[0] ? formatTimestamp(recent[0].created_at) : undefined} />
+                  <Tile icon={Calendar} label="Created" empty="Unknown" value={formatTimestamp(company.created_at)} />
+                </div>
+              </section>
+            )}
 
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">

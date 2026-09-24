@@ -43,7 +43,9 @@ function formatTimestamp(createdAt: string): string {
   return Number.isNaN(d.getTime()) ? createdAt : d.toLocaleString();
 }
 
-export function ContactDetail({ id, navigate }: { id: string; navigate: (to: string) => void }) {
+// `panel` is the same record in the side panel beside the contacts list: one
+// column, no tab strip, and no highlight tiles repeating the details above them.
+export function ContactDetail({ id, navigate, panel = false }: { id: string; navigate: (to: string) => void; panel?: boolean }) {
   const { fetchContact, fetchActivities, updateContact, emailContact, scheduleMeeting, addNote, connections, setError } = useCrm();
 
   const [contact, setContact] = useState<Contact | null | undefined>(undefined);
@@ -190,11 +192,11 @@ export function ContactDetail({ id, navigate }: { id: string; navigate: (to: str
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Top bar: same height and rule as the sidebar brand row, so the line runs across. */}
-      <RecordTopBar onClose={() => navigate("/contacts")} crumb="Contacts" />
+      {!panel && <RecordTopBar onClose={() => navigate("/contacts")} crumb="Contacts" />}
 
-      <div className="flex min-h-0 flex-1">
+      <div className={cn("flex min-h-0 flex-1", panel && "flex-col overflow-y-auto")}>
         {/* Left column: identity, actions, record details. */}
-        <aside className="flex w-[31.25rem] shrink-0 flex-col overflow-y-auto border-r border-border">
+        <aside className={cn("flex shrink-0 flex-col", !panel && "w-[31.25rem] overflow-y-auto border-r border-border")}>
           <div className="flex items-center gap-3 px-4 pt-4">
             <Avatar firstName={contact.first_name} lastName={contact.last_name} className="size-9 text-xs" />
             <div className="flex min-w-0 flex-1 items-center">
@@ -274,21 +276,23 @@ export function ContactDetail({ id, navigate }: { id: string; navigate: (to: str
         </aside>
 
         {/* Main column: tabs, highlights, activity, and the sections that will grow. */}
-        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <RecordTabs tabs={tabs} />
+        <main className={cn("flex min-w-0 flex-col", panel ? "shrink-0 border-t border-border" : "flex-1 overflow-y-auto")}>
+          {!panel && <RecordTabs tabs={tabs} />}
 
-          <div className="flex flex-col gap-8 p-6">
-            <section className="flex flex-col gap-3">
-              <h2 className="text-sm font-medium">Highlights</h2>
-              <div className="grid grid-cols-3 gap-3">
-                <Tile icon={AtSign} label="Email addresses" empty="No email address" value={contact.email && <a href={`mailto:${contact.email}`} className="text-info hover:underline">{contact.email}</a>} />
-                <Tile icon={Phone} label="Phone numbers" empty="No phone number" value={contact.phone} />
-                <Tile icon={Building2} label="Company" empty="No company" value={contact.company_name} />
-                <Tile icon={Briefcase} label="Job title" empty="No job title" value={contact.title} />
-                <Tile icon={Clock} label="Last activity" empty="No activity" value={recent[0] ? formatTimestamp(recent[0].created_at) : undefined} />
-                <Tile icon={Calendar} label="Created" empty="Unknown" value={formatTimestamp(contact.created_at)} />
-              </div>
-            </section>
+          <div className={cn("flex flex-col gap-8", panel ? "p-4" : "p-6")}>
+            {!panel && (
+              <section className="flex flex-col gap-3">
+                <h2 className="text-sm font-medium">Highlights</h2>
+                <div className="grid grid-cols-3 gap-3">
+                  <Tile icon={AtSign} label="Email addresses" empty="No email address" value={contact.email && <a href={`mailto:${contact.email}`} className="text-info hover:underline">{contact.email}</a>} />
+                  <Tile icon={Phone} label="Phone numbers" empty="No phone number" value={contact.phone} />
+                  <Tile icon={Building2} label="Company" empty="No company" value={contact.company_name} />
+                  <Tile icon={Briefcase} label="Job title" empty="No job title" value={contact.title} />
+                  <Tile icon={Clock} label="Last activity" empty="No activity" value={recent[0] ? formatTimestamp(recent[0].created_at) : undefined} />
+                  <Tile icon={Calendar} label="Created" empty="Unknown" value={formatTimestamp(contact.created_at)} />
+                </div>
+              </section>
+            )}
 
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">

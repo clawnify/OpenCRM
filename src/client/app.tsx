@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PanelLeft } from "lucide-react";
+import { Building2, PanelLeft, Users } from "lucide-react";
 import { AppNav, reportLocation, type AppNavItem } from "@clawnify/app/client";
 import { useCrmState } from "./hooks/use-crm";
 import { CrmContext } from "./context";
@@ -12,6 +12,7 @@ import { CompaniesPage } from "./components/companies/companies-page";
 import { CompanyDetail } from "./components/companies/company-detail";
 import { DealsBoard } from "./components/deals/deals-board";
 import { PropertiesPage } from "./components/properties/properties-page";
+import { RecordPanel, RecordPanelHeader } from "./components/record-page";
 
 // One definition of the navigation. <AppNav> paints it as this app's own
 // sidebar when opened directly, and hands it to the Clawnify dashboard's
@@ -40,6 +41,8 @@ export function App() {
   const isAgent = document.documentElement.hasAttribute("data-agent");
   const state = useCrmState(isAgent);
   const { path, route, navigate } = useRouter();
+  // A list opens its records in a side panel; the record's own path is the full page.
+  const openRecord = route.name === "contacts" || route.name === "companies" ? route.record : undefined;
 
   // Lets the dashboard restore this exact screen on reload.
   useEffect(() => {
@@ -84,9 +87,29 @@ export function App() {
             <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>
           ) : (
             <>
-              {route.name === "contacts" && <ContactsPage navigate={navigate} />}
+              {route.name === "contacts" && (
+                <div className="flex min-h-0 flex-1">
+                  <ContactsPage navigate={navigate} openId={openRecord} />
+                  {openRecord && (
+                    <RecordPanel label="Contact">
+                      <RecordPanelHeader icon={Users} label="Contact" onExpand={() => navigate(`/contacts/${encodeURIComponent(openRecord)}`)} onClose={() => navigate("/contacts")} />
+                      <ContactDetail key={openRecord} id={openRecord} navigate={navigate} panel />
+                    </RecordPanel>
+                  )}
+                </div>
+              )}
               {route.name === "contact" && <ContactDetail id={route.id} navigate={navigate} />}
-              {route.name === "companies" && <CompaniesPage navigate={navigate} />}
+              {route.name === "companies" && (
+                <div className="flex min-h-0 flex-1">
+                  <CompaniesPage navigate={navigate} openId={openRecord} />
+                  {openRecord && (
+                    <RecordPanel label="Company">
+                      <RecordPanelHeader icon={Building2} label="Company" onExpand={() => navigate(`/companies/${encodeURIComponent(openRecord)}`)} onClose={() => navigate("/companies")} />
+                      <CompanyDetail key={openRecord} id={openRecord} navigate={navigate} panel />
+                    </RecordPanel>
+                  )}
+                </div>
+              )}
               {route.name === "company" && <CompanyDetail id={route.id} navigate={navigate} />}
               {route.name === "deals" && <DealsBoard />}
               {route.name === "properties" && <PropertiesPage />}
