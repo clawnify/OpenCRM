@@ -40,21 +40,39 @@ export async function exportViewCsv<T>(opts: {
   const { view, listPath, rowsKey, name, columns } = opts;
   const { fields } = await api<{ fields: { key: string; visible: boolean }[] }>("GET", `/api/views/${view.id}/fields`);
   const hidden = new Set(fields.filter((f) => !f.visible).map((f) => f.key));
-  const shown = columns.filter((c) => !hidden.has(c.key));
+  await exportListCsv({
+    filename: view.name, listPath, rowsKey, name, columns: columns.filter((c) => !hidden.has(c.key)),
+    query: { filters: view.filters, sort: view.sort, order: view.order },
+  });
+}
 
+/**
+ * Downloads every record a list query selects (filters, search, sort), with
+ * `columns` after the name: a view as saved, or the list as it is on screen.
+ */
+export async function exportListCsv<T>(opts: {
+  filename: string;
+  listPath: string;
+  rowsKey: string;
+  query: { filters: unknown[]; sort: string | null; order: "asc" | "desc" | null; search?: string };
+  name: { label: string; text: (row: T) => string };
+  columns: { label: string; text: (row: T) => string }[];
+}): Promise<void> {
+  const { listPath, rowsKey, query, name, columns } = opts;
   const rows: T[] = [];
   for (let page = 1; rows.length < MAX_EXPORT_ROWS; page++) {
     const q = new URLSearchParams({
-      page: String(page), limit: "100", sort: view.sort ?? "created_at", order: view.order ?? "desc",
+      page: String(page), limit: "100", sort: query.sort ?? "created_at", order: query.order ?? "desc",
       tz: String(-new Date().getTimezoneOffset()),
     });
-    if (view.filters.length) q.set("filters", JSON.stringify(view.filters));
+    if (query.filters.length) q.set("filters", JSON.stringify(query.filters));
+    if (query.search) q.set("search", query.search);
     const data = await api<Record<string, unknown>>("GET", `${listPath}?${q}`);
     const batch = (data[rowsKey] as T[]) ?? [];
     rows.push(...batch);
     if (!batch.length || rows.length >= Number(data.total)) break;
   }
 
-  const file = `${view.name.replace(/[^\w\- ]+/g, "").trim() || "export"}.csv`;
-  downloadCsv(file, [name.label, ...shown.map((c) => c.label)], rows.slice(0, MAX_EXPORT_ROWS).map((r) => [name.text(r), ...shown.map((c) => c.text(r))]));
+  const file = `${opts.filename.replace(/[^\w\- ]+/g, "").trim() || "export"}.csv`;
+  downloadCsv(file, [name.label, ...columns.map((c) => c.label)], rows.slice(0, MAX_EXPORT_ROWS).map((r) => [name.text(r), ...columns.map((c) => c.text(r))]));
 }

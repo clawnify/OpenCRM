@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, Upload, Plus, Trash2, Download, X } from "lucide-react";
+import { Search, Upload, Plus, Trash2, X } from "lucide-react";
 import { useCrm } from "@/context";
 import { PageHeader, Avatar, EntityIcon, CategoryBadge, EmptyState } from "@/components/shared";
 import { ConnectionsIndicator } from "@/components/connections-indicator";
@@ -19,7 +19,8 @@ import { CustomFieldDisplay, readCustom } from "@/lib/custom-fields";
 import { relationColumn } from "@/lib/relations";
 import { customFieldCopy, customFieldEdit, optionEdit, recordEdit, textEdit } from "@/components/cell-editors";
 import { useTableView, useAggregates, listFilterQuery } from "@/hooks/use-table-view";
-import { downloadCsv, exportViewCsv } from "@/lib/csv";
+import { downloadCsv, exportListCsv, exportViewCsv } from "@/lib/csv";
+import { ExportButton } from "@/components/export-button";
 import type { Contact } from "@/types";
 
 const dash = <span className="text-muted-foreground">—</span>;
@@ -142,6 +143,13 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
     downloadCsv("contacts.csv", [name.label, ...shown.map((c) => c.label)], rows.map((r) => [name.text(r), ...shown.map((c) => c.text(r))]));
   };
 
+  // Every record the list selects as it is now (filters, search, sort, the columns on screen).
+  const exportAll = () => exportListCsv<Contact>({
+    filename: listView.view?.name ?? "contacts", listPath: "/api/contacts", rowsKey: "contacts", name,
+    columns: columns.filter((c) => view.visible(c.key)),
+    query: { filters: sanitize(contactsPag.filters), sort: contactsPag.sort, order: contactsPag.order, search: contactsPag.search },
+  }).catch((e) => setError(e instanceof Error ? e.message : "Could not export"));
+
   const confirmDelete = async () => {
     const ids = [...selected];
     setDeleting(true);
@@ -166,10 +174,7 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
               <X className="size-4" />
               Clear
             </Button>
-            <Button size="sm" variant="secondary" onClick={exportSelected}>
-              <Download className="size-4" />
-              Export
-            </Button>
+            <ExportButton selected={selected.size} pageRows={contacts.length} total={contactsPag.total} onSelected={exportSelected} onAll={exportAll} />
             <Button size="sm" variant="destructive" onClick={() => setConfirmOpen(true)}>
               <Trash2 className="size-4" />
               Delete
