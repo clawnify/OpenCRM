@@ -9,13 +9,14 @@
  */
 
 import { useState } from "react";
-import { Gauge, Tag, Link2, AtSign, Phone as PhoneIcon, Tags as TagsIcon, Hash, Type, ToggleLeft, Calendar, List, X, ExternalLink } from "lucide-react";
+import { ArrowLeftRight, Gauge, Tag, Link2, AtSign, Phone as PhoneIcon, Tags as TagsIcon, Hash, Type, ToggleLeft, Calendar, List, X, ExternalLink } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { cn, colorClasses, categoryToken, type ColorToken } from "@/lib/utils";
 import { api } from "@/api";
-import type { AttributeType, CustomFieldDef, EntityType } from "@/types";
+import { RelationInput } from "@/lib/relations";
+import type { AttributeType, CustomFieldDef, EntityType, RelationType } from "@/types";
 
 // ── Widget catalog (for the Properties field-type picker) ─────────────
 
@@ -44,6 +45,7 @@ export const BASE_TYPES: WidgetMeta[] = [
   { uid: "", label: "Decimal", icon: Hash, field_type: "decimal" },
   { uid: "", label: "Checkbox", icon: ToggleLeft, field_type: "boolean" },
   { uid: "", label: "Date", icon: Calendar, field_type: "date" },
+  { uid: "", label: "Relation", icon: ArrowLeftRight, field_type: "relation" },
 ];
 
 export function widgetMetaFor(def: Pick<CustomFieldDef, "custom_field" | "field_type">): WidgetMeta | undefined {
@@ -176,6 +178,12 @@ export function CustomFieldInput({
 }) {
   const widget = def.custom_field;
 
+  if (def.field_type === "relation" && def.target_entity) {
+    return (
+      <RelationInput entity={def.target_entity} value={typeof value === "string" && value ? value : null}
+        onChange={onChange} emptyLabel={`No ${def.label.toLowerCase()}`} className="bg-card shadow-edge" />
+    );
+  }
   if (widget === "clawnify::badge.badge" || def.field_type === "enumeration") {
     const vals = enumValues(def);
     const current = value == null ? "" : String(value);
@@ -211,7 +219,7 @@ export function CustomFieldInput({
   return <Input type={type} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />;
 }
 
-function TagsInput({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+export function TagsInput({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
   const tags = parseTags(value);
   const [draft, setDraft] = useState("");
   const commit = (next: string[]) => onChange(JSON.stringify(next));
@@ -259,6 +267,8 @@ export function CustomFieldsSection({
   values: Record<string, unknown>;
   onChange: (key: string, value: unknown) => void;
 }) {
+  // A relation's one_to_many side is set from the other side's records, not here.
+  defs = defs.filter((d) => d.relation_type !== "one_to_many");
   if (defs.length === 0) return null;
   return (
     <>
@@ -286,6 +296,8 @@ export const listCustomFieldsApi = (entity?: EntityType) =>
 export const createCustomField = (input: {
   entity_type: EntityType; key: string; label: string; field_type: AttributeType;
   custom_field?: string; options?: Record<string, unknown>; position?: number;
+  // A relation: its side here, the entity it links to, and the other side's key and label.
+  relation_type?: RelationType; target_entity?: EntityType; inverse_key?: string; inverse_label?: string;
 }) => api<{ def: CustomFieldDef }>("POST", "/api/custom-fields", input);
 
 export const updateCustomField = (id: string, patch: Partial<Pick<CustomFieldDef, "label" | "custom_field" | "options" | "position">>) =>

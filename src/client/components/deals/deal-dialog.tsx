@@ -16,6 +16,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Combobox } from "@/components/ui/combobox";
 import { api } from "@/api";
 import { CustomFieldsSection, readCustom } from "@/lib/custom-fields";
+import { RelationSections } from "@/components/record-relations";
 import type { Deal } from "@/types";
 
 // Radix Select forbids an empty-string item value, so we use a sentinel for the
@@ -51,8 +52,11 @@ export function DealDialog({
   onOpenChange: (open: boolean) => void;
   deal?: Deal;
 }) {
-  const { addDeal, updateDeal, setError, customFields, stages } = useCrm();
+  const { addDeal, updateDeal, setError, customFields, stages, boardDeals } = useCrm();
   const dealFields = customFields.filter((d) => d.entity_type === "deal");
+  // Deals have no record page, so a deal's one_to_many relations are listed
+  // here, from the board's copy (kept fresh as links change).
+  const live = deal && (boardDeals.find((d) => d.id === deal.id) ?? deal);
   const [form, setForm] = useState<FormState>(() => toForm(deal, stages[0]?.key ?? ""));
   const [custom, setCustom] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
@@ -176,6 +180,12 @@ export function DealDialog({
 
           <CustomFieldsSection defs={dealFields} values={custom}
             onChange={(key, v) => setCustom((cst) => ({ ...cst, [key]: v }))} />
+
+          {live && (
+            <div className="-mx-4">
+              <RelationSections defs={dealFields} row={live} />
+            </div>
+          )}
 
           <DialogFooter>
             <DialogClose asChild>

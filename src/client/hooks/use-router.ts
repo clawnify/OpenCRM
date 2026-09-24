@@ -44,6 +44,14 @@ export function withQuery(changes: Record<string, string | null>): string {
   return window.location.pathname + (s ? `?${s}` : "");
 }
 
+/** Navigate from anywhere, without the router's `navigate` in hand (a record
+ *  chip deep in a table cell). The router hears it as a history change. */
+export function go(to: string): void {
+  if (to === current()) return;
+  window.history.pushState(null, "", to);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 export function useRouter() {
   const [path, setPath] = useState<string>(current);
 

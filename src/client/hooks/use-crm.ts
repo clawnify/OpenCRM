@@ -42,6 +42,8 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
   const [connections, setConnections] = useState<ConnectionStatus>({ email: false, meeting: false, slack: false });
   const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
   const [stages, setStages] = useState<StageDef[]>([]);
+  // Bumped on every record write, so an open record page re-reads itself.
+  const [changes, setChanges] = useState(0);
 
   // ── Fetchers ──
 
@@ -145,10 +147,17 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     await Promise.all([fetchContacts(contactsPag), fetchStats()]);
   }, [contactsPag, fetchContacts, fetchStats]);
 
+  // A write can change what other records show (a relation reads from both
+  // sides), so both lists refetch and any open record page re-reads.
+  const recordsChanged = useCallback(async () => {
+    setChanges((n) => n + 1);
+    await Promise.all([fetchContacts(contactsPag), fetchCompanies(companiesPag), fetchBoardDeals(), fetchStats()]);
+  }, [contactsPag, companiesPag, fetchContacts, fetchCompanies, fetchBoardDeals, fetchStats]);
+
   const updateContact = useCallback(async (id: string, data: Partial<Contact>) => {
     await api("PUT", `/api/contacts/${id}`, data);
-    await fetchContacts(contactsPag);
-  }, [contactsPag, fetchContacts]);
+    await recordsChanged();
+  }, [recordsChanged]);
 
   const deleteContacts = useCallback(async (ids: string[]) => {
     await api("POST", "/api/contacts/bulk-delete", { ids });
@@ -182,8 +191,8 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
 
   const updateCompany = useCallback(async (id: string, data: Partial<Company>) => {
     await api("PUT", `/api/companies/${id}`, data);
-    await fetchCompanies(companiesPag);
-  }, [companiesPag, fetchCompanies]);
+    await recordsChanged();
+  }, [recordsChanged]);
 
   const deleteCompanies = useCallback(async (ids: string[]) => {
     await api("POST", "/api/companies/bulk-delete", { ids });
@@ -259,6 +268,7 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     connections, emailContact, scheduleMeeting,
     fetchActivities, addNote, importEntity,
     customFields, refetchCustomFields,
+    changes, recordsChanged,
     stages, refetchStages,
     refetchBoard: fetchBoardDeals, refetchStats: fetchStats,
     loading, error, setError,

@@ -6,6 +6,8 @@ import { sendEmail, createMeeting, notifySlack, connectionStatus } from "./integ
 import {
   listDefs,
   createDef,
+  createRelation,
+  hasColumn,
   updateDef,
   deleteDef,
   coerceCustomValue,
@@ -17,6 +19,7 @@ import {
   type EntityType,
   type CustomFieldDef,
 } from "./custom-fields.js";
+import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords } from "./relations.js";
 
 // In production Clawnify injects the CREDENTIALS broker binding + CLAWNIFY_ORG_ID
 // whenever clawnify.json declares `app.credentials`. SLACK_CHANNEL is an optional
@@ -36,6 +39,11 @@ function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+/** withRelations for a single record read (list reads call it directly). */
+async function withRelationsOne(entity: EntityType, row: unknown): Promise<unknown> {
+  return row ? (await withRelations(entity, [row as Record<string, unknown>], 100))[0] : row;
 }
 
 /** Append a row to the activity timeline. Never throws — logging is best-effort. */
@@ -75,7 +83,7 @@ async function applyCustomValues(
   const params: unknown[] = [];
   for (const [key, raw] of Object.entries(custom)) {
     const def = byKey.get(key);
-    if (!def) continue; // ignore unknown keys — only defined properties are writable
+    if (!def || !hasColumn(def)) continue; // ignore unknown keys: only defined properties with a column are writable
     sets.push(`"${key.replace(/"/g, '""')}" = ?`);
     params.push(coerceCustomValue(raw, def));
   }
@@ -148,7 +156,8 @@ async function resolveImportCustomColumns(
   entity: EntityType,
   rows: Array<{ custom?: Record<string, unknown> }>,
 ): Promise<{ keys: string[]; defByKey: Map<string, CustomFieldDef> }> {
-  const defByKey = new Map((await listDefs(entity)).map((d) => [d.key, d]));
+  // Relations aren't imported: a cell holds a name, not the linked record's id.
+  const defByKey = new Map((await listDefs(entity)).filter((d) => d.field_type !== "relation").map((d) => [d.key, d]));
   const present = new Set<string>();
   for (const r of rows) {
     if (!r.custom || typeof r.custom !== "object") continue;
@@ -559,6 +568,7 @@ app.openapi(listCompanies, async (c) => {
     if (!cols.has(sortCol)) sortCol = "id";
     let order = (q.order || "desc").toLowerCase();
     if (order !== "asc" && order !== "desc") order = "desc";
+    const sortSQL = (await relationSortSQL("company", "c", sortCol)) ?? `c.${qid(sortCol)}`;
 
     const { whereSQL, params } = companiesWhere(q, cols);
 
@@ -570,11 +580,11 @@ app.openapi(listCompanies, async (c) => {
 
     const rows = await query(
       `SELECT c.*, (SELECT COUNT(*) FROM contacts WHERE company_id = c.id) as contact_count
-       FROM companies c${whereSQL} ORDER BY c.${qid(sortCol)} ${order}, c.id LIMIT ? OFFSET ?`,
+       FROM companies c${whereSQL} ORDER BY ${sortSQL} ${order}, c.id LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
 
-    return c.json({ companies: rows, total, page, limit }, 200);
+    return c.json({ companies: await withRelations("company", rows as Record<string, unknown>[]), total, page, limit }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
   }
@@ -615,6 +625,8 @@ app.openapi(createCompany, async (c) => {
     if (unknownErr) return c.json(unknownErr, 422);
     const missingReq = await missingRequiredCustom("company", customValues, "create");
     if (missingReq.length) return c.json({ error: `Missing required field(s): ${missingReq.join(", ")}` }, 400);
+    const relationErr = await relationWriteError("company", customValues);
+    if (relationErr) return c.json({ error: relationErr }, 400);
     const name = body.name.trim();
     if (!name) return c.json({ error: "Name is required" }, 400);
 
@@ -626,7 +638,7 @@ app.openapi(createCompany, async (c) => {
 
     await applyCustomValues("company", "companies", id, customValues);
 
-    const inserted = await get("SELECT * FROM companies WHERE id = ?", [id]);
+    const inserted = await withRelationsOne("company", await get("SELECT * FROM companies WHERE id = ?", [id]));
     return c.json({ company: inserted }, 201);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -673,6 +685,8 @@ app.openapi(updateCompany, async (c) => {
     if (unknownErr) return c.json(unknownErr, 422);
     const missingReq = await missingRequiredCustom("company", customValues, "update");
     if (missingReq.length) return c.json({ error: `Missing required field(s): ${missingReq.join(", ")}` }, 400);
+    const relationErr = await relationWriteError("company", customValues);
+    if (relationErr) return c.json({ error: relationErr }, 400);
     const fields: string[] = [];
     const params: unknown[] = [];
 
@@ -696,7 +710,7 @@ app.openapi(updateCompany, async (c) => {
     }
     await applyCustomValues("company", "companies", id, customValues);
 
-    const updated = await get("SELECT * FROM companies WHERE id = ?", [id]);
+    const updated = await withRelationsOne("company", await get("SELECT * FROM companies WHERE id = ?", [id]));
     return c.json({ company: updated }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -724,6 +738,7 @@ app.openapi(deleteCompany, async (c) => {
 
     const result = await run("DELETE FROM companies WHERE id = ?", [id]);
     if (result.changes === 0) return c.json({ error: "Company not found" }, 404);
+    await detachRelations("company", [id]);
     return c.json({ ok: true }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -754,10 +769,12 @@ app.openapi(bulkDeleteCompanies, async (c) => {
   try {
     const { ids } = c.req.valid("json");
     let deleted = 0;
-    for (const part of chunk([...new Set(ids)], 90)) {
+    const unique = [...new Set(ids)];
+    for (const part of chunk(unique, 90)) {
       const result = await run(`DELETE FROM companies WHERE id IN (${part.map(() => "?").join(", ")})`, part);
       deleted += result.changes;
     }
+    await detachRelations("company", unique);
     return c.json({ deleted }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -852,6 +869,7 @@ app.openapi(listContacts, async (c) => {
     if (!cols.has(sortCol)) sortCol = "id";
     let order = (q.order || "desc").toLowerCase();
     if (order !== "asc" && order !== "desc") order = "desc";
+    const sortSQL = (await relationSortSQL("contact", "ct", sortCol)) ?? `ct.${qid(sortCol)}`;
 
     const { whereSQL, params } = contactsWhere(q, cols);
 
@@ -866,12 +884,12 @@ app.openapi(listContacts, async (c) => {
        FROM contacts ct
        LEFT JOIN companies co ON ct.company_id = co.id
        ${whereSQL}
-       ORDER BY ct.${qid(sortCol)} ${order}, ct.id
+       ORDER BY ${sortSQL} ${order}, ct.id
        LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
 
-    return c.json({ contacts: rows, total, page, limit }, 200);
+    return c.json({ contacts: await withRelations("contact", rows as Record<string, unknown>[]), total, page, limit }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
   }
@@ -913,6 +931,8 @@ app.openapi(createContact, async (c) => {
     if (unknownErr) return c.json(unknownErr, 422);
     const missingReq = await missingRequiredCustom("contact", customValues, "create");
     if (missingReq.length) return c.json({ error: `Missing required field(s): ${missingReq.join(", ")}` }, 400);
+    const relationErr = await relationWriteError("contact", customValues);
+    if (relationErr) return c.json({ error: relationErr }, 400);
     const firstName = body.first_name.trim();
     if (!firstName) return c.json({ error: "First name is required" }, 400);
 
@@ -939,7 +959,7 @@ app.openapi(createContact, async (c) => {
        WHERE ct.id = ?`,
       [id],
     );
-    return c.json({ contact: inserted }, 201);
+    return c.json({ contact: await withRelationsOne("contact", inserted) }, 201);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -986,6 +1006,8 @@ app.openapi(updateContact, async (c) => {
     if (unknownErr) return c.json(unknownErr, 422);
     const missingReq = await missingRequiredCustom("contact", customValues, "update");
     if (missingReq.length) return c.json({ error: `Missing required field(s): ${missingReq.join(", ")}` }, 400);
+    const relationErr = await relationWriteError("contact", customValues);
+    if (relationErr) return c.json({ error: relationErr }, 400);
     const fields: string[] = [];
     const params: unknown[] = [];
 
@@ -1019,7 +1041,7 @@ app.openapi(updateContact, async (c) => {
        WHERE ct.id = ?`,
       [id],
     );
-    return c.json({ contact: updated }, 200);
+    return c.json({ contact: await withRelationsOne("contact", updated) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -1046,6 +1068,7 @@ app.openapi(deleteContact, async (c) => {
 
     const result = await run("DELETE FROM contacts WHERE id = ?", [id]);
     if (result.changes === 0) return c.json({ error: "Contact not found" }, 404);
+    await detachRelations("contact", [id]);
     return c.json({ ok: true }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -1076,10 +1099,12 @@ app.openapi(bulkDeleteContacts, async (c) => {
   try {
     const { ids } = c.req.valid("json");
     let deleted = 0;
-    for (const part of chunk([...new Set(ids)], 90)) {
+    const unique = [...new Set(ids)];
+    for (const part of chunk(unique, 90)) {
       const result = await run(`DELETE FROM contacts WHERE id IN (${part.map(() => "?").join(", ")})`, part);
       deleted += result.changes;
     }
+    await detachRelations("contact", unique);
     return c.json({ deleted }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -1361,7 +1386,7 @@ app.openapi(getDealsBoard, async (c) => {
        LEFT JOIN companies co ON ct.company_id = co.id
        ORDER BY d.created_at ASC`,
     );
-    return c.json({ deals: rows }, 200);
+    return c.json({ deals: await withRelations("deal", rows as Record<string, unknown>[]) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -1450,7 +1475,7 @@ app.openapi(listDeals, async (c) => {
       [...params, limit, offset],
     );
 
-    return c.json({ deals: rows, total, page, limit, totalValue: agg?.total_value || 0 }, 200);
+    return c.json({ deals: await withRelations("deal", rows as Record<string, unknown>[]), total, page, limit, totalValue: agg?.total_value || 0 }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -1491,6 +1516,8 @@ app.openapi(createDeal, async (c) => {
     if (unknownErr) return c.json(unknownErr, 422);
     const missingReq = await missingRequiredCustom("deal", customValues, "create");
     if (missingReq.length) return c.json({ error: `Missing required field(s): ${missingReq.join(", ")}` }, 400);
+    const relationErr = await relationWriteError("deal", customValues);
+    if (relationErr) return c.json({ error: relationErr }, 400);
     const name = body.name.trim();
     if (!name) return c.json({ error: "Name is required" }, 400);
 
@@ -1524,7 +1551,7 @@ app.openapi(createDeal, async (c) => {
        WHERE d.id = ?`,
       [id],
     );
-    return c.json({ deal: inserted }, 201);
+    return c.json({ deal: await withRelationsOne("deal", inserted) }, 201);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -1570,6 +1597,8 @@ app.openapi(updateDeal, async (c) => {
     if (unknownErr) return c.json(unknownErr, 422);
     const missingReq = await missingRequiredCustom("deal", customValues, "update");
     if (missingReq.length) return c.json({ error: `Missing required field(s): ${missingReq.join(", ")}` }, 400);
+    const relationErr = await relationWriteError("deal", customValues);
+    if (relationErr) return c.json({ error: relationErr }, 400);
     if (body.stage !== undefined) {
       const stageKey = String(body.stage).trim();
       const ok = await getStageRow(stageKey);
@@ -1642,7 +1671,7 @@ app.openapi(updateDeal, async (c) => {
         await logActivity("deal", id, "stage_change", `Deal lost — ${st.label}`, { stage: body.stage });
       }
     }
-    return c.json({ deal: updated }, 200);
+    return c.json({ deal: await withRelationsOne("deal", updated) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -1669,6 +1698,7 @@ app.openapi(deleteDeal, async (c) => {
 
     const result = await run("DELETE FROM deals WHERE id = ?", [id]);
     if (result.changes === 0) return c.json({ error: "Deal not found" }, 404);
+    await detachRelations("deal", [id]);
     return c.json({ ok: true }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -2114,7 +2144,7 @@ app.get("/api/contacts/:id", async (c) => {
       [id],
     );
     if (!contact) return c.json({ error: "Contact not found" }, 404);
-    return c.json({ contact }, 200);
+    return c.json({ contact: await withRelationsOne("contact", contact) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -2130,7 +2160,43 @@ app.get("/api/companies/:id", async (c) => {
       [id],
     );
     if (!company) return c.json({ error: "Company not found" }, 404);
-    return c.json({ company }, 200);
+    return c.json({ company: await withRelationsOne("company", company) }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// ── Records (named, for relation chips and pickers) ────────────────
+
+// `search` matches the record's name; `ids` (comma-separated, at most 60)
+// returns those records instead, to name ids a filter or form already holds.
+app.get("/api/records", async (c) => {
+  try {
+    const entity = c.req.query("entity") ?? "";
+    if (!isEntityType(entity)) return c.json({ error: "entity must be contact, company or deal" }, 400);
+    const ids = (c.req.query("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (ids.length > 60) return c.json({ error: "At most 60 ids" }, 400);
+    return c.json({ records: await searchRecords(entity, c.req.query("search") ?? "", ids) }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// The values a column already holds, for a picker that offers them (an
+// industry typed once is picked after). Any real column of the entity.
+app.get("/api/values", async (c) => {
+  try {
+    const entity = c.req.query("entity") ?? "";
+    if (!isEntityType(entity)) return c.json({ error: "entity must be contact, company or deal" }, 400);
+    const table = ENTITY_TABLES[entity];
+    const field = c.req.query("field") ?? "";
+    if (!(await tableColumns(table)).has(field)) return c.json({ error: `Unknown field "${field}"` }, 400);
+    const col = qid(field);
+    const rows = await query<{ v: string }>(
+      // One per value ignoring case: "consulting" and "Consulting" are one option.
+      `SELECT MIN(${col}) AS v FROM ${table} WHERE ${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} COLLATE NOCASE ORDER BY v COLLATE NOCASE LIMIT 200`,
+    );
+    return c.json({ values: rows.map((r) => String(r.v)) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -2150,6 +2216,21 @@ app.post("/api/custom-fields", async (c) => {
     const body = await c.req.json();
     if (!isEntityType(body.entity_type)) return c.json({ error: "Invalid entity_type" }, 400);
     if (!body.key || !body.label) return c.json({ error: "key and label are required" }, 400);
+    if (body.field_type === "relation") {
+      if (!isEntityType(body.target_entity)) return c.json({ error: "A relation needs target_entity: contact, company or deal" }, 400);
+      if (!body.inverse_key || !body.inverse_label) return c.json({ error: "A relation needs inverse_key and inverse_label for its other side" }, 400);
+      const def = await createRelation({
+        entity_type: body.entity_type,
+        key: String(body.key),
+        label: String(body.label),
+        relation_type: body.relation_type,
+        target_entity: body.target_entity,
+        inverse_key: String(body.inverse_key),
+        inverse_label: String(body.inverse_label),
+        position: body.position ?? 0,
+      });
+      return c.json({ def }, 201);
+    }
     const def = await createDef({
       entity_type: body.entity_type,
       key: String(body.key),

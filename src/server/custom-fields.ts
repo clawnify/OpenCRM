@@ -27,7 +27,12 @@ export type AttributeType =
   | "date"
   | "datetime"
   | "enumeration"
-  | "json";
+  | "json"
+  | "relation";
+
+/** A relation's side: many_to_one holds the linked id in its own column;
+ *  one_to_many lists the records whose many_to_one points back at this one. */
+export type RelationType = "many_to_one" | "one_to_many";
 
 export interface CustomFieldDef {
   id: string;
@@ -38,6 +43,9 @@ export interface CustomFieldDef {
   custom_field: string; // widget registry uid, or "" for a bare base type
   options: Record<string, unknown>;
   position: number;
+  relation_type: RelationType | null;
+  target_entity: EntityType | null;
+  inverse_def_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -127,17 +135,25 @@ export async function missingRequiredCustom(
 
 /** Human-facing list of writable field keys (built-ins + registered custom),
  *  for the error body when a write includes an unknown field. Omits the
- *  server-managed columns a caller can't set. */
+ *  server-managed columns a caller can't set, and the one_to_many side of a
+ *  relation (it is set from the other side). */
 export async function writableFieldKeys(entity: EntityType): Promise<string[]> {
   const managed = new Set(["id", "created_at", "updated_at"]);
   const builtins = [...BUILTIN_COLUMNS[entity]].filter((k) => !managed.has(k));
-  const custom = (await listDefs(entity)).map((d) => d.key);
+  const custom = (await listDefs(entity)).filter(hasColumn).map((d) => d.key);
   return [...builtins, ...custom];
+}
+
+/** Whether a def has a column of its own: all do but a relation's one_to_many side. */
+export function hasColumn(def: Pick<CustomFieldDef, "relation_type">): boolean {
+  return def.relation_type !== "one_to_many";
 }
 
 function quote(ident: string): string {
   return '"' + ident.replace(/"/g, '""') + '"';
 }
+
+const indexName = (table: string, key: string) => quote(`idx_${table}_${key}`);
 
 // ── Registry CRUD ─────────────────────────────────────────────────────
 
@@ -206,6 +222,70 @@ export async function createDef(input: CustomFieldInput): Promise<CustomFieldDef
   return (await getDef(id))!;
 }
 
+export interface RelationInput {
+  entity_type: EntityType;
+  key: string;
+  label: string;
+  relation_type: RelationType;
+  target_entity: EntityType;
+  /** The other side's key and label, on `target_entity`. */
+  inverse_key: string;
+  inverse_label: string;
+  position?: number;
+}
+
+/**
+ * Create a relation: a def on each side, pointing at each other, and a column
+ * on the many_to_one side holding the linked record's id, indexed. "Each
+ * contact has one partner company" is many_to_one on contacts (column
+ * contacts.partner_company_id) with a one_to_many "Partner contacts" on
+ * companies. The column has no foreign key, because SQLite can't drop a
+ * column that has one: deleting a record clears links to it instead
+ * (detachRelations). Returns the def on `entity_type`.
+ */
+export async function createRelation(input: RelationInput): Promise<CustomFieldDef> {
+  const { entity_type: source, target_entity: target } = input;
+  if (!isEntityType(target)) throw new Error(`Invalid target_entity "${String(target)}".`);
+  if (input.relation_type !== "many_to_one" && input.relation_type !== "one_to_many") {
+    throw new Error('relation_type must be "many_to_one" or "one_to_many".');
+  }
+  assertValidKey(source, input.key);
+  assertValidKey(target, input.inverse_key);
+  if (source === target && input.key === input.inverse_key) throw new Error("The two sides of a relation need different keys.");
+  const column = input.relation_type === "many_to_one" ? { entity: source, key: input.key } : { entity: target, key: input.inverse_key };
+  if (!column.key.endsWith("_id")) {
+    throw new Error(`"${column.key}" holds the linked record's id, so its key must end in _id.`);
+  }
+  for (const [entity, key] of [[source, input.key], [target, input.inverse_key]] as const) {
+    if (await get("SELECT id FROM custom_field_defs WHERE entity_type = ? AND key = ?", [entity, key])) {
+      throw new Error(`A "${key}" property already exists on ${entity}.`);
+    }
+  }
+
+  const id = crypto.randomUUID();
+  const inverseId = crypto.randomUUID();
+  const next = await get<{ n: number }>("SELECT COALESCE(MAX(position) + 1, 0) AS n FROM custom_field_defs WHERE entity_type = ?", [target]);
+  const insert = "INSERT INTO custom_field_defs (id, entity_type, key, label, field_type, position, relation_type, target_entity, inverse_def_id) VALUES (?, ?, ?, ?, 'relation', ?, ?, ?, ?)";
+  const inverseType: RelationType = input.relation_type === "many_to_one" ? "one_to_many" : "many_to_one";
+  // shortcut: sequential writes with a manual undo, since the db helper has no
+  // batch; a crash between them can leave a def without its column (a later
+  // syncEntityColumns adds it).
+  const table = quote(ENTITY_TABLES[column.entity]);
+  let added = false;
+  await run(insert, [id, source, input.key, input.label, input.position ?? 0, input.relation_type, target, inverseId]);
+  try {
+    await run(insert, [inverseId, target, input.inverse_key, input.inverse_label, next?.n ?? 0, inverseType, source, id]);
+    await run(`ALTER TABLE ${table} ADD COLUMN ${quote(column.key)} TEXT`);
+    added = true;
+    await run(`CREATE INDEX IF NOT EXISTS ${indexName(ENTITY_TABLES[column.entity], column.key)} ON ${table}(${quote(column.key)})`);
+  } catch (err) {
+    if (added) await run(`ALTER TABLE ${table} DROP COLUMN ${quote(column.key)}`).catch(() => {});
+    await run("DELETE FROM custom_field_defs WHERE id IN (?, ?)", [id, inverseId]);
+    throw err;
+  }
+  return (await getDef(id))!;
+}
+
 /** Update label/options/position/widget of a def. Key + field_type are immutable
  *  (changing storage would need a destructive column migration). */
 export async function updateDef(
@@ -227,15 +307,20 @@ export async function updateDef(
   return getDef(id);
 }
 
-/** Delete a def and drop its column. */
+/** Delete a def and drop its column. A relation goes as a whole: both sides,
+ *  and the many_to_one side's index before its column (SQLite won't drop an
+ *  indexed column). */
 export async function deleteDef(id: string): Promise<boolean> {
   const def = await getDef(id);
   if (!def) return false;
-  await run("DELETE FROM custom_field_defs WHERE id = ?", [id]);
-  // Guard again before touching DDL — never drop a built-in.
-  if (KEY_RE.test(def.key) && !BUILTIN_COLUMNS[def.entity_type].has(def.key)) {
-    const table = ENTITY_TABLES[def.entity_type];
-    await run(`ALTER TABLE ${quote(table)} DROP COLUMN ${quote(def.key)}`).catch(() => {
+  const inverse = def.inverse_def_id ? await getDef(def.inverse_def_id) : null;
+  for (const d of inverse ? [def, inverse] : [def]) {
+    await run("DELETE FROM custom_field_defs WHERE id = ?", [d.id]);
+    // Guard again before touching DDL — never drop a built-in.
+    if (!hasColumn(d) || !KEY_RE.test(d.key) || BUILTIN_COLUMNS[d.entity_type].has(d.key)) continue;
+    const table = ENTITY_TABLES[d.entity_type];
+    if (d.relation_type === "many_to_one") await run(`DROP INDEX IF EXISTS ${indexName(table, d.key)}`).catch(() => {});
+    await run(`ALTER TABLE ${quote(table)} DROP COLUMN ${quote(d.key)}`).catch(() => {
       /* column may already be gone; deletion of the def is the source of truth */
     });
   }
@@ -269,8 +354,11 @@ export async function syncEntityColumns(entity: EntityType): Promise<void> {
   const have = new Set(cols.map((c) => c.name));
   const defs = await listDefs(entity);
   for (const def of defs) {
-    if (!KEY_RE.test(def.key) || BUILTIN_COLUMNS[entity].has(def.key) || have.has(def.key)) continue;
+    if (!hasColumn(def) || !KEY_RE.test(def.key) || BUILTIN_COLUMNS[entity].has(def.key) || have.has(def.key)) continue;
     await run(`ALTER TABLE ${quote(table)} ADD COLUMN ${quote(def.key)} ${sqliteAffinity(def.field_type)}`);
+    if (def.relation_type === "many_to_one") {
+      await run(`CREATE INDEX IF NOT EXISTS ${indexName(table, def.key)} ON ${quote(table)}(${quote(def.key)})`);
+    }
   }
 }
 
