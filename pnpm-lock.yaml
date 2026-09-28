@@ -12,8 +12,8 @@ importers:
         specifier: ^0.3.1
         version: 0.3.1(@cloudflare/workers-types@4.20260702.1)(@hono/zod-openapi@0.18.4(hono@4.12.2)(zod@3.25.76))(@phosphor-icons/react@2.1.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(hono@4.12.2)(react@19.2.7)
       '@clawnify/connections':
-        specifier: ^0.2.2
-        version: 0.2.2
+        specifier: ^0.5.1
+        version: 0.5.1
       '@clawnify/db':
         specifier: ^0.4.2
         version: 0.4.2(@cloudflare/workers-types@4.20260702.1)
@@ -233,14 +233,14 @@ packages:
       react:
         optional: true
 
-  '@clawnify/connections@0.2.2':
-    resolution: {integrity: sha512-dRPVXa3oqdNuCd/GcVvoGLJGe7Zrh+k3Nx6J6Xjcmr3VoABiN6E9Mw+nEbqH7qilHGiprLhPfc/OtHJ5tpZM1Q==}
+  '@clawnify/connections@0.5.1':
+    resolution: {integrity: sha512-qQwZIjpkMUmhzNpqMhQyHI8ttcpEHIYLoI4h66fNrxoyDIgINz8v9Cau53EHcBOuCr/huWp8XXBuuhnJsVXvRQ==}
 
   '@clawnify/db@0.4.2':
     resolution: {integrity: sha512-s+G/5bDVFx7Na8WVETfl8EhyPcbmgs5LIE1TsM0vGUOAtPihQGlVX1xpfmg5lsMv8+OChKaHsZIMnzpXY8pyAw==}
 
-  '@clawnify/integrations@0.2.2':
-    resolution: {integrity: sha512-st7m8+zszpskeaj599kepIz8LSX0ASTkJThJ7gNGuOG7Ra9sn3ui+1P9kkKo8opYOXGOnLxYpAX2n8zRKkY26w==}
+  '@clawnify/integrations@0.4.0':
+    resolution: {integrity: sha512-epX7r9VHczmjHJuegsn1ogRM9SG8CsYLsyF6hfxN3uV4nDYjdWazNingZnAgOI+ynVj0ZLV8x2rUnNoUUnSuQw==}
 
   '@clawnify/routes@0.3.0':
     resolution: {integrity: sha512-ALKVoN1ui9KXSSoybSKumEiJ7fTAe793y2HwCPGEkvXlgV29yAGXad8qVOeGYzrKe6KACJ8twFA4uheQrJSmqA==}
@@ -2565,9 +2565,9 @@ snapshots:
       - sql.js
       - sqlite3
 
-  '@clawnify/connections@0.2.2':
+  '@clawnify/connections@0.5.1':
     dependencies:
-      '@clawnify/integrations': 0.2.2
+      '@clawnify/integrations': 0.4.0
 
   '@clawnify/db@0.4.2(@cloudflare/workers-types@4.20260702.1)':
     dependencies:
@@ -2603,7 +2603,7 @@ snapshots:
       - sql.js
       - sqlite3
 
-  '@clawnify/integrations@0.2.2': {}
+  '@clawnify/integrations@0.4.0': {}
 
   '@clawnify/routes@0.3.0(@hono/zod-openapi@0.18.4(hono@4.12.2)(zod@3.25.76))(hono@4.12.2)':
     dependencies:
