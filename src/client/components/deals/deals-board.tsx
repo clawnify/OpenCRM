@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Plus, Pencil, Trash2, MoreHorizontal, ArrowRightLeft } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Plus, Pencil, Trash2, MoreHorizontal, ArrowRightLeft, CircleDollarSign, CalendarDays, Building2, UserRound, type LucideIcon } from "lucide-react";
+import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useCrm } from "@/context";
 import { PageHeader, Avatar, EntityIcon, EmptyState } from "@/components/shared";
 import { DealDialog } from "@/components/deals/deal-dialog";
@@ -15,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { withQuery } from "@/hooks/use-router";
 import { api } from "@/api";
-import { formatMoney, colorClasses, cn } from "@/lib/utils";
+import { formatMoney, formatDate, colorClasses, cn } from "@/lib/utils";
 import { fieldsFromDefs } from "@/lib/filters";
 import type { Deal, StageDef } from "@/types";
 
@@ -78,6 +79,25 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
     </Button>
   ) : <NewDealButton onCreate={createNamed} />;
 
+  // Dropping a card on another column and the card's "Move" menu make the same write.
+  const moveDeal = async (d: Deal, stage: string) => {
+    if (d.stage === stage) return;
+    try {
+      await updateDeal(d.id, { stage });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not move the deal");
+    }
+  };
+  // A press becomes a drag only after 4px of movement, so a click still opens the deal.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const [dragging, setDragging] = useState<Deal | null>(null);
+  const onDragStart = (e: DragStartEvent) => setDragging(boardDeals.find((d) => d.id === e.active.id) ?? null);
+  const onDragEnd = (e: DragEndEvent) => {
+    setDragging(null);
+    const deal = boardDeals.find((d) => d.id === e.active.id);
+    if (deal && e.over) void moveDeal(deal, String(e.over.id));
+  };
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -114,6 +134,7 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
         <EmptyState title="No deals yet. Add your first." action={addButton} />
       ) : (
         <div className="min-h-0 flex-1 overflow-x-auto">
+          <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
           <div className="flex h-full min-w-max gap-4 p-6">
             {stages.map((stage) => {
               const columnDeals = boardDeals.filter((d) => d.stage === stage.key);
@@ -151,88 +172,21 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    {columnDeals.map((d) => {
-                      const contactName = `${d.contact_first_name ?? ""} ${d.contact_last_name ?? ""}`.trim();
-                      return (
-                        // DESIGN.md: resting card = border only, quiet hover one
-                        // tonal step; actions reveal on hover (always visible in
-                        // agent mode — never gate an action behind hover there).
-                        // The name is the card's link to the deal; its ::after
-                        // stretches over the card, and the actions sit above it.
-                        <Card key={d.id} className={cn("group/card relative flex flex-col gap-1.5 p-3 transition-colors hover:bg-secondary/50", d.id === openId && "bg-secondary")}>
-                          <div className="flex items-start justify-between gap-2">
-                            <button type="button" onClick={() => openRecord(d.id)} aria-current={d.id === openId || undefined}
-                              className="text-left text-sm font-medium outline-none after:absolute after:inset-0 after:rounded-[inherit] after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring">
-                              {d.name}
-                            </button>
-                            <span className="tabular shrink-0 text-sm font-semibold">{formatMoney(d.value)}</span>
-                          </div>
-
-                          {(d.company_name || contactName) && (
-                            <div className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
-                              {d.company_name && (
-                                <span className="flex min-w-0 items-center gap-1.5">
-                                  <EntityIcon name={d.company_name} domain={d.company_domain} className="size-5" />
-                                  <span className="truncate">{d.company_name}</span>
-                                </span>
-                              )}
-                              {d.company_name && contactName && <span className="text-border">·</span>}
-                              {contactName && (
-                                <span className="flex min-w-0 items-center gap-1.5">
-                                  <Avatar firstName={d.contact_first_name} lastName={d.contact_last_name} className="size-5 text-[0.5625rem]" />
-                                  <span className="truncate">{contactName}</span>
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="flex items-center justify-end gap-2">
-                            <div className={cn(
-                              "relative z-10 flex items-center transition-opacity",
-                              isAgent ? "opacity-100" : "opacity-0 group-hover/card:opacity-100 focus-within:opacity-100",
-                            )}>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button size="icon" variant="ghost" className="size-7" aria-label={`Move ${d.name} to another stage`}>
-                                    <ArrowRightLeft className="size-3.5" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  {stages.filter((s) => s.key !== d.stage).map((s) => {
-                                    const sc = colorClasses(s.color);
-                                    return (
-                                      <DropdownMenuItem key={s.key} onClick={() => updateDeal(d.id, { stage: s.key })}>
-                                        <span className={cn("size-2 rounded-full", sc.dot)} /> {s.label}
-                                      </DropdownMenuItem>
-                                    );
-                                  })}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="size-7"
-                                aria-label={`Edit ${d.name}`}
-                                onClick={() => openEdit(d)}
-                              >
-                                <Pencil className="size-3.5" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="size-7 text-muted-foreground hover:text-destructive"
-                                aria-label={`Delete ${d.name}`}
-                                onClick={() => setDeleteTarget(d)}
-                              >
-                                <Trash2 className="size-3.5" />
-                              </Button>
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })}
-                  </div>
+                  <StageDrop stage={stage.key}>
+                    {columnDeals.map((d) => (
+                      <DealCard
+                        key={d.id}
+                        deal={d}
+                        open={d.id === openId}
+                        isAgent={isAgent}
+                        stages={stages}
+                        onOpen={() => openRecord(d.id)}
+                        onMove={(to) => void moveDeal(d, to)}
+                        onEdit={() => openEdit(d)}
+                        onDelete={() => setDeleteTarget(d)}
+                      />
+                    ))}
+                  </StageDrop>
                 </div>
               );
             })}
@@ -249,6 +203,16 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
               </button>
             </div>
           </div>
+          {/* The card in hand follows the pointer, lifted like anything that leaves the page. */}
+          <DragOverlay dropAnimation={null}>
+            {dragging && (
+              <Card className="flex w-72 cursor-grabbing flex-col gap-2 p-3 shadow-[var(--shadow-popover)]">
+                <DealTitle deal={dragging} />
+                <DealFields deal={dragging} />
+              </Card>
+            )}
+          </DragOverlay>
+          </DndContext>
         </div>
       )}
 
@@ -321,7 +285,7 @@ function NewDealButton({ onCreate }: { onCreate: (name: string) => Promise<void>
           Add deal
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72">
+      <PopoverContent align="end" className="w-72 p-3">
         <form onSubmit={submit} className="flex flex-col gap-2">
           <Label htmlFor="new-deal-name">Deal name</Label>
           <Input id="new-deal-name" autoFocus required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme renewal" />
@@ -331,6 +295,133 @@ function NewDealButton({ onCreate }: { onCreate: (name: string) => Promise<void>
         </form>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** A stage's column body: where a dragged deal can be dropped. */
+function StageDrop({ stage, children }: { stage: string; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: stage });
+  return (
+    <div ref={setNodeRef} className={cn("-m-1 flex min-h-24 flex-1 flex-col gap-2 rounded-md p-1 transition-colors", isOver && "bg-secondary")}>
+      {children}
+    </div>
+  );
+}
+
+function DealCard({ deal: d, open, isAgent, stages, onOpen, onMove, onEdit, onDelete }: {
+  deal: Deal;
+  open: boolean;
+  isAgent: boolean;
+  stages: StageDef[];
+  onOpen: () => void;
+  onMove: (stage: string) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  // Agents move deals with the Move menu, which is always visible for them.
+  const { setNodeRef, listeners, isDragging } = useDraggable({ id: d.id, disabled: isAgent });
+  return (
+    // DESIGN.md: resting card = border only, quiet hover one tonal step;
+    // actions reveal on hover (always visible in agent mode — never gate an
+    // action behind hover there). The name is the card's link to the deal;
+    // its ::after stretches over the card, and the actions sit above it.
+    <Card ref={setNodeRef} {...listeners}
+      className={cn("group/card relative flex flex-col gap-2 p-3 transition-colors hover:bg-secondary/50", open && "bg-secondary", isDragging && "opacity-40")}>
+      <button type="button" onClick={onOpen} aria-current={open || undefined}
+        className="min-w-0 text-left outline-none after:absolute after:inset-0 after:rounded-[inherit] after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring">
+        <DealTitle deal={d} />
+      </button>
+      <DealFields deal={d} />
+
+      <div className={cn(
+        "z-10 flex items-center",
+        isAgent
+          ? "relative justify-end"
+          : "absolute right-2 top-2 rounded-sm bg-card opacity-0 shadow-edge transition-opacity group-hover/card:opacity-100 focus-within:opacity-100",
+      )}>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon" variant="ghost" className="size-7" aria-label={`Move ${d.name} to another stage`}>
+              <ArrowRightLeft className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {stages.filter((s) => s.key !== d.stage).map((s) => {
+              const sc = colorClasses(s.color);
+              return (
+                <DropdownMenuItem key={s.key} onClick={() => onMove(s.key)}>
+                  <span className={cn("size-2 rounded-full", sc.dot)} /> {s.label}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button size="icon" variant="ghost" className="size-7" aria-label={`Edit ${d.name}`} onClick={onEdit}>
+          <Pencil className="size-3.5" />
+        </Button>
+        <Button size="icon" variant="ghost" className="size-7 text-muted-foreground hover:text-destructive" aria-label={`Delete ${d.name}`} onClick={onDelete}>
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function DealTitle({ deal }: { deal: Deal }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+      <Avatar firstName={deal.name} className="size-5 text-[0.5625rem]" />
+      <span className="truncate">{deal.name}</span>
+    </span>
+  );
+}
+
+/** A deal's fields, one row each: the value, or the field's name in faint type
+ *  while it is empty, so every card has the same shape and shows what is missing. */
+function DealFields({ deal: d }: { deal: Deal }) {
+  const contactName = `${d.contact_first_name ?? ""} ${d.contact_last_name ?? ""}`.trim();
+  return (
+    <dl className="flex flex-col gap-0.5 text-[0.8125rem]">
+      <FieldRow icon={CircleDollarSign} label="Amount">
+        <span className="tabular">{formatMoney(d.value)}</span>
+      </FieldRow>
+      <FieldRow icon={CalendarDays} label="Close date">
+        {d.close_date ? formatDate(d.close_date) : null}
+      </FieldRow>
+      <FieldRow icon={Building2} label="Company">
+        {d.company_name ? (
+          <>
+            <EntityIcon name={d.company_name} domain={d.company_domain} className="size-4" />
+            <span className="truncate">{d.company_name}</span>
+          </>
+        ) : null}
+      </FieldRow>
+      <FieldRow icon={UserRound} label="Contact">
+        {contactName ? (
+          <>
+            <Avatar firstName={d.contact_first_name} lastName={d.contact_last_name} className="size-4 text-[0.5rem]" />
+            <span className="truncate">{contactName}</span>
+          </>
+        ) : null}
+      </FieldRow>
+    </dl>
+  );
+}
+
+function FieldRow({ icon: Icon, label, children }: { icon: LucideIcon; label: string; children: ReactNode }) {
+  return (
+    <div className="flex h-6 min-w-0 items-center gap-2">
+      <dt className="sr-only">{label}</dt>
+      <Icon className="size-3.5 shrink-0 text-faint" aria-hidden />
+      <dd className="flex min-w-0 items-center gap-1.5">
+        {children ?? (
+          <>
+            <span className="text-faint" aria-hidden>{label}</span>
+            <span className="sr-only">Not set</span>
+          </>
+        )}
+      </dd>
+    </div>
   );
 }
 

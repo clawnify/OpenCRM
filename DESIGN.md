@@ -21,8 +21,9 @@ colors:
   faint: "#94A3B8"            # placeholders, disabled text, decorative icons only
   # ── Lines ──
   border: "#E2E8F0"           # hairlines, card outlines, zone dividers
-  ring: "#2563EB"             # focus ring — the ONLY blue in the chrome
-  link: "#2563EB"             # inline text links (same blue as ring)
+  ring: "#1B1A19"             # focus ring: ink, never a hue (a coloured ring reads as an error)
+  ring-halo: "#EDEBE7"        # the 3px neutral halo around a focused input
+  link: "#2563EB"             # inline text links: the ONLY blue in the chrome
   # ── Brand action (primary = Clawnify coral, shared with the dashboard) ──
   primary: "#DD5164"          # the single coral CTA per screen — same hue as the dashboard
   primary-hover: "#C53A4E"    # darkens on hover (never lightens)
@@ -44,7 +45,8 @@ colors:
   muted-dark: "#9BA7B3"
   faint-dark: "#6E7681"
   border-dark: "#30363D"
-  ring-dark: "#4493F8"
+  ring-dark: "#EFEEED"
+  ring-halo-dark: "#2E2E2C"
   link-dark: "#4493F8"
   primary-dark: "#DD5164"      # coral holds on the dark canvas (no inversion)
   primary-hover-dark: "#C53A4E"
@@ -330,7 +332,7 @@ This is the single highest-leverage move. Generic AI UIs ship one `<h3>` and a w
 
 Everything else in the chrome stays **monochrome**. The coral is rationed to that one solid CTA — the only other coral on screen is the soft 12% tint marking the **active sidebar item** (a location indicator, not an action). Color elsewhere is reserved for:
 
-- **Blue (`ring`/`link`)** — focus rings and inline text links. Never buttons, never fills.
+- **Blue (`link`)** — inline text links. Never buttons, never fills. Focus rings are ink (`ring`), never a hue.
 - **Status tones** — `success`/`warning`/`danger`, tinted badges and validation only.
 
 So the rule isn't "no color in the chrome" — it's **one colored action, monochrome everything else, and color otherwise belongs to the data** (status badges, category pills, charts). Secondary and ghost actions stay neutral; a screen with two coral buttons has none. That discipline — a single brand CTA against an otherwise gray-white, ink-text interface — is what keeps a coral-buttoned app reading as a serious tool rather than a vibe-coded gradient demo.
@@ -363,7 +365,8 @@ Neutral-dominant; the full palette ships in light and dark (`*-dark` applies und
 - **`faint` (#94A3B8):** placeholders, disabled states, decorative icons. Never for text that must be read.
 - **`border` (#E2E8F0):** the workhorse — card outlines, zone dividers, table separators, input borders.
 - **`primary` (#DD5164) / `primary-hover` (#C53A4E):** Clawnify coral — the single brand CTA per screen, shared with the dashboard. Darkens on hover. The default; overridable per app.
-- **`ring` / `link` (#2563EB):** the only chromatic blue, confined to focus indication and inline links — never a button.
+- **`link` (#2563EB):** the only chromatic blue, confined to inline links. Never a button.
+- **`ring` (ink):** focus indication. Never the app's hue: next to a red or coral accent, a coloured focus ring reads as an error.
 - **Status triplets:** each of `success`/`warning`/`danger` has a text tone and a `*-tint` background, both with dark variants. Tints exist **so components never hardcode a hex** — `button-danger-hover` and the badges reference them.
 
 ## Typography
@@ -431,7 +434,7 @@ Built on **shadcn/ui** primitives, restyled to these tokens. The shadcn defaults
 - **If you override a primitive's padding, audit its sub-parts.** A primitive's parts often assume the default padding. The classic trap: setting `p-0` on `DialogContent` while `DialogFooter` still carries `-mx-4 -mb-4` (negative margins meant to cancel the default `p-4`) — with `p-0` those negatives push the footer *outside* the rounded dialog. If you go `p-0`, add `overflow-hidden` to the content and neutralize the footer's bleed (`mx-0 mb-0`), or keep the default padding and inset per-section instead.
 
 - **Buttons** — `button-primary` (coral, the one CTA per screen), `button-secondary` (white, bordered — the default for most actions), `button-ghost` (toolbar/row actions), `button-danger` (red text, `danger-tint` hover). An `inline-flex` row, `items-center justify-center`. Label is `text-sm` (0.875rem / `font-medium` 500); radius is `rounded` (0.25rem); an icon (`shrink-0`, `size-4`) sits `gap-x-1.5` (0.375rem) from the label. Height is `button-height` (2rem / 32px / `h-8`) with `py-0` and `px-2` (0.5rem) — compact and dense, the Linear/Attio tier, not a chunky 40px web button. In **agent/touch mode** it grows to `tap-target-agent` (2.5rem / 40px). Icon + label, never icon-only for a primary action.
-- **Inputs** — bordered `surface` fill; focus swaps the border to `ring` plus a 2px low-opacity blue halo. No heavy glow.
+- **Inputs** — bordered `surface` fill; focus swaps the border to `ring` (ink) plus a 3px neutral `ring-halo`. No heavy glow.
 - **Cards** — `card` shell + stacked `card-zone`s, each opened by an `eyebrow` (signature #1). A one-zone card is fine; it still gets its eyebrow.
 - **Tables** — `surface-sunken` header in `label` type, `border` between rows, hover in `surface-sunken`, numeric columns in `data` right-aligned, footer aggregate.
 - **Segmented controls / tabs** — a `surface-sunken` track holding the segments; the active segment is a **raised white (`surface`) pill** with a hairline `border` and a faint shadow (`0 1px 2px rgba(0,0,0,0.06)`), inactive segments transparent with `muted` text. **Never fill the active tab with `foreground`/ink** — a solid dark fill reads as an accent or a CTA, and fills are reserved for the one coral primary. The selected state is *raised*, not *coloured* (the macOS / Linear segmented pattern). Use it for view switchers and small option groups (e.g. date ranges); for primary page navigation prefer the sidebar.

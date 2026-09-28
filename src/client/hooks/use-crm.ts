@@ -227,8 +227,14 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
 
   // A deal open in the panel re-reads on `changes`, so a stage moved on the board shows there too.
   const updateDeal = useCallback(async (id: string, data: Partial<Deal>) => {
-    await api("PUT", `/api/deals/${id}`, data);
-    await Promise.all([fetchDeals(dealsPag), recordsChanged()]);
+    // The board shows the change at once (a dropped card stays where it was
+    // dropped); the refetch settles it, and puts it back if the write fails.
+    setBoardDeals((ds) => ds.map((d) => (d.id === id ? { ...d, ...data } : d)));
+    try {
+      await api("PUT", `/api/deals/${id}`, data);
+    } finally {
+      await Promise.all([fetchDeals(dealsPag), recordsChanged()]);
+    }
   }, [dealsPag, fetchDeals, recordsChanged]);
 
   const deleteDeal = useCallback(async (id: string) => {
