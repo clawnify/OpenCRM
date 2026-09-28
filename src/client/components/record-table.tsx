@@ -83,6 +83,7 @@ export function RecordTable<T extends { id: string }>({
   onCustomize,
   totals,
   onAdd,
+  ai,
 }: {
   rows: T[];
   name: NameColumn<T>;
@@ -99,6 +100,12 @@ export function RecordTable<T extends { id: string }>({
   totals: Record<string, number | string | null>;
   /** The "+ Add new" row under the records: opens the create dialog. */
   onAdd: () => void;
+  /** AI columns: a header's AI control (given the empty rows on screen) and a
+   *  cell's AI state, which replaces the value while the AI fills it. */
+  ai?: {
+    header: (column: RecordColumn<T>, emptyIds: string[]) => ReactNode;
+    cell: (row: T, column: RecordColumn<T>) => { thinking: boolean; control: ReactNode } | null;
+  };
 }) {
   const shown = columns.filter((c) => view.visible(c.key));
   // The cell being edited, as "rowId:columnKey".
@@ -142,8 +149,15 @@ export function RecordTable<T extends { id: string }>({
             </span>
           </TableHead>
           {shown.map((c) => (
-            <TableHead key={c.key} className={cn(c.align === "right" && "text-right")} {...sizing(c.key)}>
-              <SortLabel label={c.label} col={c.sort} sorting={sorting} onSort={onSort} />
+            <TableHead key={c.key} className={cn("group/col", c.align === "right" && "text-right")} {...sizing(c.key)}>
+              {ai ? (
+                <span className={cn("flex min-w-0 items-center gap-1", c.align === "right" ? "justify-end" : "justify-between")}>
+                  <SortLabel label={c.label} col={c.sort} sorting={sorting} onSort={onSort} />
+                  {ai.header(c, rows.filter((r) => !c.text(r).trim()).map((r) => r.id))}
+                </span>
+              ) : (
+                <SortLabel label={c.label} col={c.sort} sorting={sorting} onSort={onSort} />
+              )}
             </TableHead>
           ))}
           {/* The "+": no rule on its right, so it reads as the end of the columns. */}
@@ -189,19 +203,24 @@ export function RecordTable<T extends { id: string }>({
                   </a>
                 </span>
               </TableCell>
-              {shown.map((c) => c.edit ? (
-                <EditableCell
-                  key={c.key}
-                  column={c}
-                  edit={c.edit}
-                  row={row}
-                  editing={editing === `${row.id}:${c.key}`}
-                  onEdit={() => setEditing(`${row.id}:${c.key}`)}
-                  onDone={() => setEditing(null)}
-                />
-              ) : (
-                <TableCell key={c.key} className={cn(c.align === "right" && "text-right")}>{c.render(row)}</TableCell>
-              ))}
+              {shown.map((c) => {
+                const aiState = ai?.cell(row, c) ?? null;
+                if (aiState?.thinking) return <TableCell key={c.key}>{aiState.control}</TableCell>;
+                return c.edit ? (
+                  <EditableCell
+                    key={c.key}
+                    column={c}
+                    edit={c.edit}
+                    row={row}
+                    editing={editing === `${row.id}:${c.key}`}
+                    onEdit={() => setEditing(`${row.id}:${c.key}`)}
+                    onDone={() => setEditing(null)}
+                    extra={aiState?.control}
+                  />
+                ) : (
+                  <TableCell key={c.key} className={cn("group/cell relative", c.align === "right" && "text-right")}>{c.render(row)}{aiState?.control}</TableCell>
+                );
+              })}
               <TableCell className="shadow-none" />
               <TableCell aria-hidden="true" />
             </TableRow>
@@ -237,13 +256,15 @@ export function RecordTable<T extends { id: string }>({
 }
 
 /** A cell whose value edits in place. Hover outlines it; click or Enter edits. */
-function EditableCell<T extends { id: string }>({ column, edit, row, editing, onEdit, onDone }: {
+function EditableCell<T extends { id: string }>({ column, edit, row, editing, onEdit, onDone, extra }: {
   column: RecordColumn<T>;
   edit: CellEdit<T>;
   row: T;
   editing: boolean;
   onEdit: () => void;
   onDone: () => void;
+  /** A control at the cell's right edge, e.g. its AI state. */
+  extra?: ReactNode;
 }) {
   const cell = useRef<HTMLTableCellElement>(null);
   // Escape drops a text edit; any other way out (Enter, a click away) keeps it.
@@ -265,6 +286,7 @@ function EditableCell<T extends { id: string }>({ column, edit, row, editing, on
         >
           {column.render(row)}
           {column.copy?.(row) && <CopyButton value={column.copy(row)} />}
+          {extra}
         </TableCell>
       </PopoverAnchor>
       <PopoverContent

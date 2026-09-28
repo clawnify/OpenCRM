@@ -218,3 +218,28 @@ CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(status);
 CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage);
 CREATE INDEX IF NOT EXISTS idx_activities_entity ON activities(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_custom_field_defs_entity ON custom_field_defs(entity_type, position);
+
+-- AI columns: fields whose empty cells the AI fills on request, and the prompt it follows.
+CREATE TABLE IF NOT EXISTS ai_columns (
+  entity_type TEXT NOT NULL,
+  field_key TEXT NOT NULL,
+  prompt TEXT NOT NULL DEFAULT '',
+  research INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (entity_type, field_key)
+);
+
+-- One row per cell the AI was asked to fill: queued, running, done or error.
+CREATE TABLE IF NOT EXISTS ai_cells (
+  entity_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  field_key TEXT NOT NULL,
+  status TEXT NOT NULL,
+  error TEXT,
+  overwrite INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (entity_type, record_id, field_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_cells_status ON ai_cells(status, updated_at);

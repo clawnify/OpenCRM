@@ -19,6 +19,7 @@ Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with
 - **Three entities** — contacts, companies, and deals with foreign-key relationships (UUID keys, not enumerable ids)
 - **Activity timeline** — every contact/company/deal has a feed; emails, meetings, notes, and deal-won events all log to it
 - **Integrations (Clawnify connections)** — email a contact via Gmail, schedule a Google Calendar meeting, and post to Slack when a deal is won — all through the org's Clawnify connections, no keys in the app. A Google Workspace connection stands in for Gmail or Calendar when either isn't connected on its own
+- **AI columns**: hover a column (Industry, Title, your own attributes) and click the spark to have AI fill its empty cells from the rest of each record, with your instructions. It fills 20 rows at a time, so a wrong prompt costs little, and it never overwrites what someone typed. Calls go through Clawnify and are charged to the workspace's credits
 - **Gmail sync** (Settings → Email): see when you last emailed each contact and their emails on their page. You choose what it imports (all mail or some labels, and how far back), what the team sees (metadata, subjects, or everything), and whether people you email become contacts. Group and personal addresses and a blocklist are skipped. Bodies stay in Gmail: the CRM stores who wrote to whom and when, the subject only if you share it, and turning sync off deletes what it stored
 - **CSV / XLSX import** — upload a spreadsheet, map columns to fields (exact-match auto-mapping), preview, import; company names resolve to existing companies or are created
 - **Deal pipeline** — a board tracking deals through stages (prospect → qualified → proposal → negotiation → won/lost) with per-column totals
@@ -198,6 +199,11 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 | GET | `/api/email-sync` | Gmail sync settings and progress (`?check=1` also asks which account the connection signs in as) |
 | PUT | `/api/email-sync` | Change sync settings, or turn sync on or off (signed-in people only; turning off deletes what was synced) |
 | GET | `/api/email-sync/labels` | The mailbox's own Gmail labels, for importing only some |
+| GET | `/api/ai-columns?entity_type=` | The fields AI can fill, the AI columns and their instructions, and cells being filled |
+| PUT / DELETE | `/api/ai-columns/:entity/:field` | Turn AI on for a column (with instructions) or off; its values stay |
+| POST | `/api/ai-columns/:entity/:field/fill` | Fill the empty cells among the given rows, 20 at most |
+| POST | `/api/ai-columns/:entity/:field/cells/:id` | Write one cell again with AI |
+| POST | `/api/ai-columns/run` | Fill queued cells. Also the platform queue's target |
 | POST | `/api/email-sync/run` | Run a sync now. Also the platform queue's target, which chains runs until the first import is done |
 
 ## Community & Contributions

@@ -90,6 +90,25 @@ columns to fields, import. Programmatically: `POST /api/contacts/import`
 Company names are resolved to existing companies or created. Rows without a first
 name are skipped. Returns `{ imported, companiesCreated, skipped }`.
 
+## AI columns
+
+A column can be filled by AI from the rest of each record: on Companies,
+Industry and Notes; on Contacts, Title and Status; and the org's own attributes
+except URLs, emails, phones and relations. A person turns it on from the
+column header's spark and may give instructions that quote fields as
+`{{field}}` (e.g. `{{name}}`, `{{domain}}`).
+
+- `GET /api/ai-columns?entity_type=company|contact`: the fields the AI can
+  fill, the columns it fills (with their `prompt`), and cells being filled or
+  that failed (`error` says why).
+- `POST /api/ai-columns/{entity}/{field}/fill` `{ ids: [...] }`: fill the empty
+  cells among these records, at most 20 per request. A column fills one batch
+  at a time (409 while one runs). It never overwrites a value.
+- `POST /api/ai-columns/{entity}/{field}/cells/{id}`: write one cell again,
+  replacing its value.
+
+Fills spend the org's Clawnify credits: fill what the user asked for, not more.
+
 ## Agent-mode UI
 
 Append `?agent=true` for larger targets and always-visible action buttons.

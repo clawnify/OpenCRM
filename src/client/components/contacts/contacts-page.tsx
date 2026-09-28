@@ -24,6 +24,8 @@ import { ExportButton } from "@/components/export-button";
 import { EmailSyncBanner } from "@/components/email-sync/email-sync-banner";
 import { formatDate } from "@/lib/utils";
 import type { Contact } from "@/types";
+import { useAiColumns } from "@/hooks/use-ai-columns";
+import { aiTable } from "@/components/ai-column";
 
 const dash = <span className="text-muted-foreground">—</span>;
 const fullName = (c: Contact) => `${c.first_name} ${c.last_name}`.trim();
@@ -35,6 +37,11 @@ const fullName = (c: Contact) => `${c.first_name} ${c.last_name}`.trim();
 export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; viewParam?: string; filtersParam?: string }) {
   const { contacts, contactsPag, stats, setContactsPage, setContactsSort, setContactsSearch, setContactsFilters, setContactsView, deleteContacts, updateContact, customFields, setError } = useCrm();
   const contactFields = customFields.filter((d) => d.entity_type === "contact");
+  const ai = useAiColumns("contact");
+  const aiChips = [
+    { key: "first_name", label: "First name" }, { key: "last_name", label: "Last name" }, { key: "email", label: "Email" }, { key: "title", label: "Title" },
+    ...contactFields.filter((d) => d.field_type !== "relation").map((d) => ({ key: d.key, label: d.label })),
+  ];
   const filterFields = fieldsFromDefs(
     [
       { key: "first_name", label: "First name", type: "text", column: "name" },
@@ -267,6 +274,7 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
               onCustomize={() => navigate("/settings/properties")}
               totals={totals}
               onAdd={() => setDialogOpen(true)}
+              ai={aiTable<Contact>(ai, aiChips)}
             />
           </div>
 
