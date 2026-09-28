@@ -544,7 +544,8 @@ export async function contactEmails(contactId: string, limit = 50): Promise<{ em
       to_emails: jsonArray(r.to_emails).filter((e): e is string => typeof e === "string"),
       subject: r.visibility === "metadata" ? null : r.subject,
       can_open: r.visibility === "everything",
-      gmail_url: `https://mail.google.com/mail/u/${encodeURIComponent(r.mailbox)}/#all/${r.thread_id}`,
+      // authuser picks the signed-in account by address; Gmail doesn't decode an address in the /u/ path.
+      gmail_url: `https://mail.google.com/mail/?authuser=${encodeURIComponent(r.mailbox)}#all/${r.thread_id}`,
     })),
   };
 }
