@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Plus, Pencil, Trash2, MoreHorizontal, ArrowRightLeft, CircleDollarSign, CalendarDays, Building2, UserRound, type LucideIcon } from "lucide-react";
+import { Plus, Pencil, Trash2, MoreHorizontal, ArrowRightLeft, CircleDollarSign, CalendarDays, Building2, UserRound, HeartHandshake, NotebookText, Clock3, type LucideIcon } from "lucide-react";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useCrm } from "@/context";
 import { PageHeader, Avatar, EntityIcon, EmptyState } from "@/components/shared";
@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { withQuery } from "@/hooks/use-router";
 import { api } from "@/api";
-import { formatMoney, formatDate, colorClasses, cn } from "@/lib/utils";
+import { formatMoney, formatDate, daysSince, colorClasses, cn } from "@/lib/utils";
 import { fieldsFromDefs } from "@/lib/filters";
 import type { Deal, StageDef } from "@/types";
 
@@ -59,9 +59,9 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
   // in the panel, where everything else is filled in place. A required custom
   // field can't be left for later, so then the full form asks for it up front.
   const needsForm = customFields.some((d) => d.entity_type === "deal" && d.options.required === true);
-  const createNamed = async (name: string) => {
+  const createNamed = async (name: string, stage?: string) => {
     try {
-      const deal = await addDeal({ name });
+      const deal = await addDeal(stage ? { name, stage } : { name });
       openRecord(deal.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create deal");
@@ -141,17 +141,15 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
               const columnTotal = columnDeals.reduce((sum, d) => sum + (d.value || 0), 0);
               const c = colorClasses(stage.color);
               return (
-                <div key={stage.key} className="flex w-72 shrink-0 flex-col gap-3">
-                  <div className="group flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                <StageDrop key={stage.key} stage={stage.key}>
+                  <div className="group flex h-7 items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
                       <span className={cn("size-2 shrink-0 rounded-full", c.dot)} />
-                      <span className="text-sm font-semibold">{stage.label}</span>
-                      <span className="tabular text-[0.8125rem] text-muted-foreground">{columnDeals.length}</span>
+                      <span className="truncate text-sm font-semibold">{stage.label}</span>
+                      <span className="rounded-sm bg-card px-1.5 text-xs tabular text-muted-foreground shadow-edge">{columnDeals.length}</span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className="tabular text-[0.8125rem] font-medium text-muted-foreground">
-                        {formatMoney(columnTotal)}
-                      </span>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <span className="tabular text-[0.8125rem] text-muted-foreground">{formatMoney(columnTotal)}</span>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button aria-label={`Actions for stage ${stage.label}`}
@@ -169,25 +167,33 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      {!needsForm && (
+                        <NewDealButton
+                          onCreate={(name) => createNamed(name, stage.key)}
+                          trigger={
+                            <Button size="icon" variant="ghost" className="size-7 text-muted-foreground" aria-label={`Add a deal to ${stage.label}`}>
+                              <Plus className="size-4" />
+                            </Button>
+                          }
+                        />
+                      )}
                     </div>
                   </div>
 
-                  <StageDrop stage={stage.key}>
-                    {columnDeals.map((d) => (
-                      <DealCard
-                        key={d.id}
-                        deal={d}
-                        open={d.id === openId}
-                        isAgent={isAgent}
-                        stages={stages}
-                        onOpen={() => openRecord(d.id)}
-                        onMove={(to) => void moveDeal(d, to)}
-                        onEdit={() => openEdit(d)}
-                        onDelete={() => setDeleteTarget(d)}
-                      />
-                    ))}
-                  </StageDrop>
-                </div>
+                  {columnDeals.map((d) => (
+                    <DealCard
+                      key={d.id}
+                      deal={d}
+                      open={d.id === openId}
+                      isAgent={isAgent}
+                      stages={stages}
+                      onOpen={() => openRecord(d.id)}
+                      onMove={(to) => void moveDeal(d, to)}
+                      onEdit={() => openEdit(d)}
+                      onDelete={() => setDeleteTarget(d)}
+                    />
+                  ))}
+                </StageDrop>
               );
             })}
 
@@ -206,9 +212,10 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
           {/* The card in hand follows the pointer, lifted like anything that leaves the page. */}
           <DragOverlay dropAnimation={null}>
             {dragging && (
-              <Card className="flex w-72 cursor-grabbing flex-col gap-2 p-3 shadow-[var(--shadow-popover)]">
+              <Card className="flex w-full -rotate-2 cursor-grabbing flex-col p-3 shadow-[var(--shadow-popover)]">
                 <DealTitle deal={dragging} />
                 <DealFields deal={dragging} />
+                <DealAge deal={dragging} />
               </Card>
             )}
           </DragOverlay>
@@ -260,7 +267,7 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
 }
 
 /** "Add deal" as a name field: Enter creates the deal. */
-function NewDealButton({ onCreate }: { onCreate: (name: string) => Promise<void> }) {
+function NewDealButton({ onCreate, trigger }: { onCreate: (name: string) => Promise<void>; trigger?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -280,10 +287,12 @@ function NewDealButton({ onCreate }: { onCreate: (name: string) => Promise<void>
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button size="sm">
-          <Plus className="size-4" />
-          Add deal
-        </Button>
+        {trigger ?? (
+          <Button size="sm">
+            <Plus className="size-4" />
+            Add deal
+          </Button>
+        )}
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-3">
         <form onSubmit={submit} className="flex flex-col gap-2">
@@ -298,11 +307,11 @@ function NewDealButton({ onCreate }: { onCreate: (name: string) => Promise<void>
   );
 }
 
-/** A stage's column body: where a dragged deal can be dropped. */
+/** A stage's column: a tray holding its deals, and where a dragged deal is dropped. */
 function StageDrop({ stage, children }: { stage: string; children: ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage });
   return (
-    <div ref={setNodeRef} className={cn("-m-1 flex min-h-24 flex-1 flex-col gap-2 rounded-md p-1 transition-colors", isOver && "bg-secondary")}>
+    <div ref={setNodeRef} className={cn("flex w-72 shrink-0 flex-col gap-2 rounded-xl bg-secondary p-3 transition-shadow", isOver && "ring-2 ring-inset ring-ring/15")}>
       {children}
     </div>
   );
@@ -326,12 +335,13 @@ function DealCard({ deal: d, open, isAgent, stages, onOpen, onMove, onEdit, onDe
     // action behind hover there). The name is the card's link to the deal;
     // its ::after stretches over the card, and the actions sit above it.
     <Card ref={setNodeRef} {...listeners}
-      className={cn("group/card relative flex flex-col gap-2 p-3 transition-colors hover:bg-secondary/50", open && "bg-secondary", isDragging && "opacity-40")}>
+      className={cn("group/card relative flex flex-col p-3 transition-colors hover:bg-secondary/50", open && "ring-1 ring-inset ring-ring/30", isDragging && "opacity-40")}>
       <button type="button" onClick={onOpen} aria-current={open || undefined}
         className="min-w-0 text-left outline-none after:absolute after:inset-0 after:rounded-[inherit] after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring">
         <DealTitle deal={d} />
       </button>
       <DealFields deal={d} />
+      <DealAge deal={d} />
 
       <div className={cn(
         "z-10 flex items-center",
@@ -369,29 +379,30 @@ function DealCard({ deal: d, open, isAgent, stages, onOpen, onMove, onEdit, onDe
 
 function DealTitle({ deal }: { deal: Deal }) {
   return (
-    <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-      <Avatar firstName={deal.name} className="size-5 text-[0.5625rem]" />
-      <span className="truncate">{deal.name}</span>
+    <span className="flex h-7 min-w-0 items-center gap-2">
+      <HeartHandshake className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="truncate text-sm font-medium leading-6 underline decoration-border underline-offset-2">{deal.name}</span>
     </span>
   );
 }
 
-/** A deal's fields, one row each: the value, or the field's name in faint type
- *  while it is empty, so every card has the same shape and shows what is missing. */
+/** A deal's fields, one row each: the value, or a faint prompt while it is
+ *  empty, so every card has the same shape and shows what is missing. */
 function DealFields({ deal: d }: { deal: Deal }) {
   const contactName = `${d.contact_first_name ?? ""} ${d.contact_last_name ?? ""}`.trim();
+  const note = (d.notes ?? "").split("\n")[0].trim();
   return (
-    <dl className="flex flex-col gap-0.5 text-[0.8125rem]">
-      <FieldRow icon={CircleDollarSign} label="Amount">
-        <span className="tabular">{formatMoney(d.value)}</span>
-      </FieldRow>
+    <dl className="flex flex-col text-sm">
       <FieldRow icon={CalendarDays} label="Close date">
         {d.close_date ? formatDate(d.close_date) : null}
+      </FieldRow>
+      <FieldRow icon={CircleDollarSign} label="Amount">
+        <span className="tabular">{formatMoney(d.value)}</span>
       </FieldRow>
       <FieldRow icon={Building2} label="Company">
         {d.company_name ? (
           <>
-            <EntityIcon name={d.company_name} domain={d.company_domain} className="size-4" />
+            <EntityIcon name={d.company_name} domain={d.company_domain} className="size-5" />
             <span className="truncate">{d.company_name}</span>
           </>
         ) : null}
@@ -399,28 +410,44 @@ function DealFields({ deal: d }: { deal: Deal }) {
       <FieldRow icon={UserRound} label="Contact">
         {contactName ? (
           <>
-            <Avatar firstName={d.contact_first_name} lastName={d.contact_last_name} className="size-4 text-[0.5rem]" />
+            <Avatar firstName={d.contact_first_name} lastName={d.contact_last_name} className="size-5 text-[0.5625rem]" />
             <span className="truncate">{contactName}</span>
           </>
         ) : null}
+      </FieldRow>
+      <FieldRow icon={NotebookText} label="Notes" placeholder="Add note…">
+        {note ? <span className="truncate text-muted-foreground">{note}</span> : null}
       </FieldRow>
     </dl>
   );
 }
 
-function FieldRow({ icon: Icon, label, children }: { icon: LucideIcon; label: string; children: ReactNode }) {
+function FieldRow({ icon: Icon, label, placeholder = label, children }: { icon: LucideIcon; label: string; placeholder?: string; children: ReactNode }) {
   return (
-    <div className="flex h-6 min-w-0 items-center gap-2">
+    <div className="flex h-7 min-w-0 items-center gap-2">
       <dt className="sr-only">{label}</dt>
-      <Icon className="size-3.5 shrink-0 text-faint" aria-hidden />
+      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <dd className="flex min-w-0 items-center gap-1.5">
         {children ?? (
           <>
-            <span className="text-faint" aria-hidden>{label}</span>
+            <span className="text-faint" aria-hidden>{placeholder}</span>
             <span className="sr-only">Not set</span>
           </>
         )}
       </dd>
+    </div>
+  );
+}
+
+/** How long since the deal last changed: a stale deal shows it at a glance. */
+function DealAge({ deal }: { deal: Deal }) {
+  const days = daysSince(deal.updated_at);
+  return (
+    <div className="flex h-6 items-center justify-end">
+      <span className="flex items-center gap-1 text-xs tabular text-muted-foreground" title={days === 0 ? "Updated today" : `Updated ${days} day${days === 1 ? "" : "s"} ago`}>
+        <Clock3 className="size-3.5" aria-hidden />
+        {days === 0 ? "today" : `${days}d`}
+      </span>
     </div>
   );
 }
