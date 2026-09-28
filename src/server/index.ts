@@ -1,4 +1,4 @@
-import { createApp, createRoute, z } from "@clawnify/app";
+import { createApp, createRoute, widgets, z } from "@clawnify/app";
 import freemailDomains from "free-email-domains";
 import { query, get, run } from "./db.js";
 import type { CredentialBinding } from "@clawnify/connections";
@@ -520,6 +520,72 @@ app.openapi(getStats, async (c) => {
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
+});
+
+// ── Dashboard widgets ──────────────────────────────────────────────
+// Tiles the Clawnify dashboard shows on its home page while the CRM is closed
+// (GET /api/widgets). Data only: the dashboard draws them. Each value is one
+// aggregate query. Money is USD, matching formatMoney in the client.
+
+const WEEKS = 12;
+
+/** Monday (UTC) of the week `weeksAgo` weeks before this one, as YYYY-MM-DD. */
+function weekStart(weeksAgo: number): string {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) - weeksAgo * 7);
+  return d.toISOString().slice(0, 10);
+}
+
+widgets(app, async () => {
+  const since = weekStart(WEEKS - 1);
+  const [thisMonth, open, byStage, weekly, latest] = await Promise.all([
+    get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM deals WHERE created_at >= date('now', 'start of month')",
+    ),
+    get<{ total: number }>(
+      "SELECT COALESCE(SUM(value), 0) AS total FROM deals WHERE stage IN (SELECT key FROM stages WHERE is_won = 0 AND is_lost = 0)",
+    ),
+    query<{ label: string; total: number }>(
+      `SELECT s.label, COALESCE(SUM(d.value), 0) AS total
+         FROM stages s JOIN deals d ON d.stage = s.key
+        WHERE s.is_won = 0 AND s.is_lost = 0
+        GROUP BY s.key ORDER BY total DESC LIMIT 12`,
+    ),
+    // date(x, '-6 days', 'weekday 1') is the Monday on or before x.
+    query<{ wk: string; n: number }>(
+      `SELECT date(created_at, '-6 days', 'weekday 1') AS wk, COUNT(*) AS n
+         FROM deals WHERE created_at >= ? GROUP BY wk`,
+      [since],
+    ),
+    query<{ name: string; value: number }>(
+      "SELECT name, value FROM deals ORDER BY created_at DESC, rowid DESC LIMIT 5",
+    ),
+  ]);
+
+  const perWeek = new Map(weekly.map((r) => [r.wk, r.n]));
+  const usd = (n: number) =>
+    new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+
+  return [
+    { key: "deals-this-month", kind: "metric", title: "Deals created this month", value: thisMonth?.n ?? 0, at: "/deals" },
+    { key: "open-pipeline", kind: "metric", title: "Open pipeline value", value: open?.total ?? 0, format: "currency", currency: "USD", at: "/deals" },
+    {
+      key: "pipeline-by-stage", kind: "breakdown", title: "Open pipeline by stage", format: "currency", currency: "USD", at: "/deals",
+      items: byStage.map((r) => ({ label: r.label.slice(0, 80), value: r.total })),
+    },
+    {
+      key: "deals-per-week", kind: "series", title: "Deals created per week", at: "/deals",
+      points: Array.from({ length: WEEKS }, (_, i) => {
+        const wk = weekStart(WEEKS - 1 - i);
+        return { x: wk, y: perWeek.get(wk) ?? 0 };
+      }),
+    },
+    {
+      key: "latest-deals", kind: "list", title: "Latest deals", at: "/deals",
+      items: latest.map((d) => ({ label: d.name.slice(0, 80), meta: usd(d.value ?? 0) })),
+    },
+  ];
 });
 
 // ── Companies ──────────────────────────────────────────────────────
