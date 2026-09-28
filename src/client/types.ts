@@ -218,3 +218,30 @@ export interface ImportResult {
   companiesCreated?: number;
   duplicates?: number;
 }
+
+/** A field the AI may fill (GET /api/ai-columns). */
+export interface AiField {
+  key: string;
+  label: string;
+  kind: string;
+  options: string[] | null;
+}
+
+/** A column the AI fills, and what it is told. */
+export interface AiColumnConfig {
+  entity_type: string;
+  field_key: string;
+  prompt: string;
+  research: number;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A cell the AI is filling, or failed to fill. */
+export interface AiCellState {
+  record_id: string;
+  field_key: string;
+  status: "queued" | "running" | "error";
+  error: string | null;
+}

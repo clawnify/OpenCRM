@@ -19,7 +19,8 @@
 
   "api": {
     "public_routes": [
-      { "path": "/api/email-sync/run", "methods": ["POST"] }
+      { "path": "/api/email-sync/run", "methods": ["POST"] },
+      { "path": "/api/ai-columns/run", "methods": ["POST"] }
     ]
   },
 

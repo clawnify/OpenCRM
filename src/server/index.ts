@@ -26,6 +26,10 @@ import {
   VISIBILITIES, AUTO_CREATES, HISTORIES, LIVE_INTERVAL_MS, type EmailAccount,
 } from "./email-sync.js";
 import { normaliseBlocklist } from "./email-sync-rules.js";
+import {
+  AI_ENTITIES, FILL_LIMIT, FillError, eligibleFields, fieldSpec, listColumns, getColumn, saveColumn, removeColumn,
+  openCells, queueFill, queueCell, runQueued, scheduleRun as scheduleAiRun,
+} from "./ai-columns.js";
 import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, countSQL, countOf, type ManyLink } from "./relations.js";
 
 // In production Clawnify injects the CREDENTIALS broker binding + CLAWNIFY_ORG_ID
@@ -37,8 +41,9 @@ type Env = {
     CREDENTIALS?: CredentialBinding;
     CLAWNIFY_ORG_ID?: string;
     SLACK_CHANNEL?: string;
-    // The org token (injected at build) reaches the platform queue that chains
-    // Gmail sync runs. The URLs are only set off-platform, to point both at a
+    // The org token (injected at build) reaches the platform queue, which chains
+    // Gmail sync runs and AI fills, and the platform's model endpoint, which
+    // AI columns call. The URLs are only set off-platform, to point them at a
     // local stand-in.
     CLAWNIFY_TOKEN?: string;
     CLAWNIFY_API_URL?: string;
@@ -2229,6 +2234,109 @@ app.get("/api/emails/:mailbox/:id", async (c) => {
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
+});
+
+// ── AI columns ─────────────────────────────────────────────────────
+//
+// A column whose empty cells the AI fills on request (ai-columns.ts). A fill
+// takes at most FILL_LIMIT rows and only empty cells. Turning AI on or off for
+// a column is a signed-in person's decision, since fills spend the org's
+// credits; people and agents can then fill and regenerate cells.
+
+const aiEntity = (v: string | undefined): EntityType | null =>
+  (AI_ENTITIES as string[]).includes(v ?? "") ? (v as EntityType) : null;
+const mayFill = (c: Parameters<typeof caller>[0]) => ["user", "api", "agent"].includes(caller(c) ?? "");
+
+/** Fill now, in the background of this request, and book a queue run as the backstop. */
+function startAiRun(c: { env: Env["Bindings"]; req: { url: string }; executionCtx: { waitUntil(p: Promise<unknown>): void } }) {
+  const origin = new URL(c.req.url).origin;
+  c.executionCtx.waitUntil(runQueued(c.env).then((r) => (r.more ? scheduleAiRun(c.env, origin, 0) : undefined)).catch(() => {}));
+  c.executionCtx.waitUntil(scheduleAiRun(c.env, origin));
+}
+
+// The fields the AI may fill, the columns it fills, and cells in progress or failed.
+app.get("/api/ai-columns", async (c) => {
+  const entity = aiEntity(c.req.query("entity_type"));
+  if (!entity) return c.json({ error: "entity_type must be company or contact" }, 400);
+  const [fields, columns, cells] = await Promise.all([eligibleFields(entity), listColumns(entity), openCells(entity)]);
+  return c.json({
+    fields: fields.map(({ key, label, kind, options }) => ({ key, label, kind, options: options ?? null })),
+    columns,
+    cells,
+    limit: FILL_LIMIT,
+    can_configure: mayConfigure(c),
+  }, 200);
+});
+
+// Turn AI on for a column, or change what it's told.
+app.put("/api/ai-columns/:entity/:key", async (c) => {
+  if (!mayConfigure(c)) return c.json({ error: "Only a signed-in person can set up AI for a column." }, 403);
+  const entity = aiEntity(c.req.param("entity"));
+  const key = c.req.param("key");
+  if (!entity || !(await fieldSpec(entity, key))) return c.json({ error: "The AI can't fill this field." }, 400);
+  const body = await c.req.json<{ prompt?: unknown; research?: unknown }>().catch(() => ({} as { prompt?: unknown; research?: unknown }));
+  if (body.prompt !== undefined && typeof body.prompt !== "string") return c.json({ error: "prompt must be text" }, 400);
+  const prompt = (body.prompt ?? "").trim();
+  if (prompt.length > 2000) return c.json({ error: "Keep the instructions under 2,000 characters." }, 400);
+  if (body.research === true) return c.json({ error: "Web research isn't available yet." }, 400);
+  const who = user(c)?.email ?? user(c)?.id ?? null;
+  return c.json({ column: await saveColumn(entity, key, prompt, false, who) }, 200);
+});
+
+// Turn AI off for a column. Values it already wrote stay.
+app.delete("/api/ai-columns/:entity/:key", async (c) => {
+  if (!mayConfigure(c)) return c.json({ error: "Only a signed-in person can set up AI for a column." }, 403);
+  const entity = aiEntity(c.req.param("entity"));
+  if (!entity) return c.json({ error: "entity_type must be company or contact" }, 400);
+  await removeColumn(entity, c.req.param("key"));
+  return c.json({ ok: true }, 200);
+});
+
+// Fill the empty cells among these rows (the ones on screen, in order), at most FILL_LIMIT.
+app.post("/api/ai-columns/:entity/:key/fill", async (c) => {
+  if (!mayFill(c)) return c.json({ error: "Sign in to use AI." }, 403);
+  const entity = aiEntity(c.req.param("entity"));
+  if (!entity) return c.json({ error: "entity_type must be company or contact" }, 400);
+  const body = await c.req.json<{ ids?: unknown }>().catch(() => ({} as { ids?: unknown }));
+  if (!Array.isArray(body.ids)) return c.json({ error: "ids must be a list of record ids" }, 400);
+  try {
+    const result = await queueFill(entity, c.req.param("key"), body.ids.map(String));
+    if (result.queued) startAiRun(c);
+    return c.json(result, 200);
+  } catch (err) {
+    if (err instanceof FillError) return c.json({ error: err.message }, err.status);
+    throw err;
+  }
+});
+
+// Write this one cell again, replacing its value.
+app.post("/api/ai-columns/:entity/:key/cells/:id", async (c) => {
+  if (!mayFill(c)) return c.json({ error: "Sign in to use AI." }, 403);
+  const entity = aiEntity(c.req.param("entity"));
+  const key = c.req.param("key");
+  const id = c.req.param("id");
+  if (!entity || !(await fieldSpec(entity, key))) return c.json({ error: "The AI can't fill this field." }, 400);
+  if (!(await getColumn(entity, key))) return c.json({ error: "Turn on AI for this column first" }, 409);
+  const exists = await get(`SELECT 1 AS ok FROM "${ENTITY_TABLES[entity]}" WHERE id = ?`, [id]);
+  if (!exists) return c.json({ error: "Record not found" }, 404);
+  await queueCell(entity, id, key, true);
+  startAiRun(c);
+  return c.json({ queued: 1 }, 200);
+});
+
+// One bounded run over the queued cells. Called by the platform queue (a
+// signed delivery on a declared public route) or by a person or agent.
+app.post("/api/ai-columns/run", async (c) => {
+  const raw = await c.req.text();
+  const signed = await verifyDelivery(raw, {
+    signature: c.req.header("X-Queue-Signature") ?? null,
+    timestamp: c.req.header("X-Queue-Timestamp") ?? null,
+    keyId: c.req.header("X-Queue-Key-Id") ?? null,
+  }).catch(() => false);
+  if (!signed && !mayFill(c)) return c.json({ error: "Sign in to use AI." }, 403);
+  const result = await runQueued(c.env);
+  if (result.more) await scheduleAiRun(c.env, new URL(c.req.url).origin, 0);
+  return c.json(result, 200);
 });
 
 // ── Contact import (CSV / XLSX, mapped client-side) ────────────────

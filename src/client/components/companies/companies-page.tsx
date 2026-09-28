@@ -21,6 +21,8 @@ import { useTableView, useAggregates, listFilterQuery } from "@/hooks/use-table-
 import { downloadCsv, exportListCsv, exportViewCsv } from "@/lib/csv";
 import { ExportButton } from "@/components/export-button";
 import type { Company } from "@/types";
+import { useAiColumns } from "@/hooks/use-ai-columns";
+import { aiTable } from "@/components/ai-column";
 
 const dash = <span className="text-muted-foreground">—</span>;
 
@@ -28,6 +30,11 @@ const dash = <span className="text-muted-foreground">—</span>;
 export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string; viewParam?: string; filtersParam?: string }) {
   const { companies, companiesPag, stats, setCompaniesPage, setCompaniesSort, setCompaniesSearch, setCompaniesFilters, setCompaniesView, deleteCompanies, updateCompany, customFields, setError } = useCrm();
   const companyFields = customFields.filter((d) => d.entity_type === "company");
+  const ai = useAiColumns("company");
+  const aiChips = [
+    { key: "name", label: "Name" }, { key: "domain", label: "Domain" }, { key: "industry", label: "Industry" },
+    ...companyFields.filter((d) => d.field_type !== "relation").map((d) => ({ key: d.key, label: d.label })),
+  ];
   const filterFields = fieldsFromDefs(
     [
       { key: "name", label: "Name", type: "text", column: "name" },
@@ -242,6 +249,7 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
               onCustomize={() => navigate("/settings/properties")}
               totals={totals}
               onAdd={() => setDialogOpen(true)}
+              ai={aiTable<Company>(ai, aiChips)}
             />
           </div>
 
