@@ -543,6 +543,10 @@ app.openapi(getStats, async (c) => {
 // aggregate query. Money is USD, matching formatMoney in the client.
 
 const WEEKS = 12;
+// Every widget summarises deals, so each carries the Deals section's tile:
+// the same icon and colour as the "deals" item of the <AppNav> in
+// client/app.tsx. Keep the two in step.
+const DEALS = { icon: "dollar-sign", color: "green" } as const;
 
 /** Monday (UTC) of the week `weeksAgo` weeks before this one, as YYYY-MM-DD. */
 function weekStart(weeksAgo: number): string {
@@ -583,21 +587,21 @@ widgets(app, async () => {
     new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 
   return [
-    { key: "deals-this-month", kind: "metric", title: "Deals created this month", value: thisMonth?.n ?? 0, at: "/deals" },
-    { key: "open-pipeline", kind: "metric", title: "Open pipeline value", value: open?.total ?? 0, format: "currency", currency: "USD", at: "/deals" },
+    { key: "deals-this-month", kind: "metric", title: "Deals created this month", value: thisMonth?.n ?? 0, at: "/deals", ...DEALS },
+    { key: "open-pipeline", kind: "metric", title: "Open pipeline value", value: open?.total ?? 0, format: "currency", currency: "USD", at: "/deals", ...DEALS },
     {
-      key: "pipeline-by-stage", kind: "breakdown", title: "Open pipeline by stage", format: "currency", currency: "USD", at: "/deals",
+      key: "pipeline-by-stage", kind: "breakdown", title: "Open pipeline by stage", format: "currency", currency: "USD", at: "/deals", ...DEALS,
       items: byStage.map((r) => ({ label: r.label.slice(0, 80), value: r.total })),
     },
     {
-      key: "deals-per-week", kind: "series", title: "Deals created per week", at: "/deals",
+      key: "deals-per-week", kind: "series", title: "Deals created per week", at: "/deals", ...DEALS,
       points: Array.from({ length: WEEKS }, (_, i) => {
         const wk = weekStart(WEEKS - 1 - i);
         return { x: wk, y: perWeek.get(wk) ?? 0 };
       }),
     },
     {
-      key: "latest-deals", kind: "list", title: "Latest deals", at: "/deals",
+      key: "latest-deals", kind: "list", title: "Latest deals", at: "/deals", ...DEALS,
       items: latest.map((d) => ({ label: d.name.slice(0, 80), meta: usd(d.value ?? 0) })),
     },
   ];
