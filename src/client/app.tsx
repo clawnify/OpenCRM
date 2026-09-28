@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Building2, Handshake, PanelLeft, Users } from "lucide-react";
-import { AppNav, reportLocation, type AppNavItem } from "@clawnify/app/client";
+import { AppNav, reportLocation, useHostChanges, useHostNavigate, type AppNavItem } from "@clawnify/app/client";
 import { useCrmState } from "./hooks/use-crm";
 import { CrmContext } from "./context";
 import { useRouter, withQuery, type Route } from "./hooks/use-router";
@@ -50,6 +50,14 @@ export function App() {
   useEffect(() => {
     reportLocation(path);
   }, [path]);
+
+  // The Clawnify dashboard's chat drives this app too: it opens a page
+  // through our router (no reload), and after it writes records through the
+  // API, the lists and any open record re-read, the same as after our own edits.
+  useHostNavigate((to) => navigate(to));
+  useHostChanges(() => {
+    void state.recordsChanged();
+  });
 
   // Collapse folds the SDK sidebar to icons. The toggle lives here, not in
   // <AppNav>, because the SDK has no slot for it; the proper home is the SDK.

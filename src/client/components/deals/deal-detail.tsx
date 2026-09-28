@@ -4,7 +4,7 @@ import { useCrm } from "@/context";
 import { Button } from "@/components/ui/button";
 import { InlineField } from "@/components/ui/inline-field";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection } from "@/components/record-page";
+import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, AskAi, useRecordChat } from "@/components/record-page";
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { RelationInput } from "@/lib/relations";
 import { formatMoney, colorClasses, cn } from "@/lib/utils";
@@ -29,6 +29,7 @@ export function DealDetail({ id, navigate, panel = false }: { id: string; naviga
   const { fetchDeal, updateDeal, fetchActivities, setError, customFields, changes, stages } = useCrm();
   const relationDefs = customFields.filter((d) => d.entity_type === "deal" && d.field_type === "relation");
   const [deal, setDeal] = useState<Deal | null | undefined>(undefined);
+  useRecordChat("deal", "Deal", id, deal ? deal.name : undefined);
   const [activities, setActivities] = useState<Activity[]>([]);
 
   const saveField = async (patch: Partial<Deal>) => {
@@ -94,6 +95,7 @@ export function DealDetail({ id, navigate, panel = false }: { id: string; naviga
             <div className="min-w-0 flex-1">
               <InlineField value={deal.name} placeholder="Deal name" onSave={(v) => { if (v) return saveField({ name: v }); }} className="h-8 w-auto px-1.5 text-base font-semibold" />
             </div>
+            <AskAi about={deal.name || "this deal"} />
           </div>
 
           <DetailsSection title="Deal">
