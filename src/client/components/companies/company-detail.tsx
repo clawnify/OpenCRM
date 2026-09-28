@@ -4,7 +4,7 @@ import { useCrm } from "@/context";
 import { EntityIcon, CategoryBadge } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { InlineField } from "@/components/ui/inline-field";
-import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection } from "@/components/record-page";
+import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, AskAi, useRecordChat } from "@/components/record-page";
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ValuesMenu } from "@/components/cell-editors";
@@ -24,6 +24,7 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
   const { fetchCompany, updateCompany, fetchActivities, setError, customFields, changes } = useCrm();
   const relationDefs = customFields.filter((d) => d.entity_type === "company" && d.field_type === "relation");
   const [company, setCompany] = useState<Company | null | undefined>(undefined);
+  useRecordChat("company", "Company", id, company ? company.name : undefined);
   const [activities, setActivities] = useState<Activity[]>([]);
 
   const saveField = async (patch: Partial<Company>) => {
@@ -92,6 +93,7 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
             <Button variant="outline" size="sm" onClick={() => navigate(`/contacts?company=${encodeURIComponent(company.id)}`)}>
               <Users className="size-4" /> Contacts {company.contact_count ? <span className="rounded-xs bg-secondary px-1.5 text-xs tabular text-muted-foreground">{company.contact_count}</span> : null}
             </Button>
+            <AskAi about={company.name || "this company"} />
           </div>
 
           <DetailsSection title="Record details">

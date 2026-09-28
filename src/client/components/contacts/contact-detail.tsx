@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { InlineField } from "@/components/ui/inline-field";
-import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection } from "@/components/record-page";
+import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, AskAi, useRecordChat } from "@/components/record-page";
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -51,6 +51,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
   const relationDefs = customFields.filter((d) => d.entity_type === "contact" && d.field_type === "relation");
 
   const [contact, setContact] = useState<Contact | null | undefined>(undefined);
+  useRecordChat("contact", "Contact", id, contact ? `${contact.first_name} ${contact.last_name}`.trim() : undefined);
   const [activities, setActivities] = useState<Activity[]>([]);
 
   const [openForm, setOpenForm] = useState<FormKind | null>(null);
@@ -227,6 +228,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
             <Button variant="outline" size="icon" onClick={() => openFormKind("note")} aria-label="Add note" title="Add note">
               <StickyNote className="size-4" />
             </Button>
+            <AskAi about={`${contact.first_name} ${contact.last_name}`.trim() || "this contact"} />
           </div>
 
           {openForm === "email" && (
