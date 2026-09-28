@@ -10,6 +10,8 @@ timeline and Clawnify integrations. Preact + Hono + D1.
   both optional. Setting a contact on a deal with no company gives it the
   contact's company; send `company_id` to set or clear it yourself.
 - `GET /api/stats` — counts + total pipeline value (excludes lost deals).
+- `GET /api/widgets` — the tiles the Clawnify home page shows: deals created
+  this month, open pipeline value and by stage, deals per week, latest deals.
 
 ## Pipeline stages (data, not code)
 
