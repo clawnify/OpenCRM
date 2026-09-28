@@ -299,13 +299,14 @@ export function coerceAnswer(spec: FieldSpec, raw: string): string | number | nu
 }
 
 /**
- * Instructions that mention the company's domain ({{domain}} on a company,
- * {{company_domain}} on a contact) also get that site's homepage as context:
- * quoting the domain is how a column asks for it, so there is no switch.
+ * Whether a fill also gets the company's homepage as context: when the
+ * instructions quote its domain ({{domain}} on a company, {{company_domain}}
+ * on a contact), or quote no field at all, since instructions that name
+ * nothing get everything. There is no switch.
  */
-export function mentionsDomain(entity: EntityType, prompt: string): boolean {
-  const key = entity === "company" ? "domain" : "company_domain";
-  return new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`).test(prompt);
+export function readsWebsite(entity: EntityType, prompt: string): boolean {
+  const quoted = [...prompt.matchAll(/\{\{\s*([a-z][a-z0-9_]*)\s*\}\}/g)].map((m) => m[1]);
+  return quoted.length === 0 || quoted.includes(entity === "company" ? "domain" : "company_domain");
 }
 
 /** A company's site as `https://host`, from whatever was typed in Domain; null when there is none. */
@@ -379,9 +380,9 @@ async function fillCell(env: AiEnv, cell: Pick<AiCell, "entity_type" | "record_i
   const company = entity === "contact" && record.company_id
     ? await get<Record<string, unknown>>("SELECT id, name, domain, industry FROM companies WHERE id = ?", [record.company_id])
     : null;
-  // The site of the company the record is, or belongs to, when the instructions mention its domain.
+  // The site of the company the record is, or belongs to, unless the instructions quote other fields only.
   const siteOf = entity === "company" ? record : company;
-  const page = siteOf && mentionsDomain(entity, column.prompt) ? await companyPage(env, { id: siteOf.id, domain: siteOf.domain }) : null;
+  const page = siteOf && readsWebsite(entity, column.prompt) ? await companyPage(env, { id: siteOf.id, domain: siteOf.domain }) : null;
   // A contact's instructions can quote its company too.
   const vars = entity === "contact" ? { ...record, company_name: company?.name, company_domain: company?.domain } : record;
 
@@ -399,10 +400,7 @@ async function fillCell(env: AiEnv, cell: Pick<AiCell, "entity_type" | "record_i
   ].filter(Boolean).join("\n\n");
 
   const value = coerceAnswer(spec, await complete(env, system, user));
-  if (value === null) {
-    const unread = page && !page.markdown ? ` (couldn't read ${new URL(page.url).host})` : "";
-    throw new Error(`Not enough in the record to answer${unread}`);
-  }
+  if (value === null) throw new Error("Not enough in the record to answer");
   const onlyIfEmpty = cell.overwrite ? "" : ` AND ("${key}" IS NULL OR TRIM("${key}") = '')`;
   await run(`UPDATE "${table}" SET "${key}" = ?, updated_at = datetime('now') WHERE id = ?${onlyIfEmpty}`, [value, id]);
 }
