@@ -140,9 +140,9 @@ export const countSQL = (link: ManyLink, prefix: string) =>
 /** A count field's many side: "count:contacts" → "contacts". Null for any other field. */
 export const countOf = (field: string) => (field.startsWith("count:") ? field.slice(6) : null);
 
-/** The built-in one_to_many sides: a company's contacts, a contact's deals. */
+/** The built-in one_to_many sides: a company's contacts and deals, a contact's deals. */
 const BUILTIN_MANY: Partial<Record<EntityType, Record<string, ManyLink>>> = {
-  company: { contacts: { table: "contacts", fk: "company_id" } },
+  company: { contacts: { table: "contacts", fk: "company_id" }, deals: { table: "deals", fk: "company_id" } },
   contact: { deals: { table: "deals", fk: "contact_id" } },
 };
 
@@ -160,7 +160,7 @@ export async function manyLinks(entity: EntityType): Promise<Record<string, Many
 /** The built-in links, which predate relation defs: column → the entity it holds. */
 const BUILTIN_LINKS: Partial<Record<EntityType, Record<string, EntityType>>> = {
   contact: { company_id: "company" },
-  deal: { contact_id: "contact" },
+  deal: { contact_id: "contact", company_id: "company" },
 };
 
 /** ORDER BY for a column holding a linked record's id (a many_to_one relation,

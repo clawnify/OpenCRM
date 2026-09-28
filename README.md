@@ -26,7 +26,7 @@ Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with
 - **Sorting, search, pagination** — server-side, debounced
 - **Filters** — one chip per field (text contains/is, number ranges, multi-value status, dates: on, before, after, today, past/next N days/weeks/months), plus an advanced filter of rules joined by AND/OR with one level of rule groups; Open a list pre-filtered with `?filters=` (the same JSON the API takes)
 - **Views** — named, shared views of each list ("All contacts" is the default): each keeps its own filters, sort and columns. Switch from the view bar, add one from the list as it is, edit a name in place, delete one; Update view saves your changes to it for everyone, Reset drops them. The default view is locked to the whole list: filter or sort it for the moment, and "Save as new view" keeps it. Export (in a view's menu, the default view included) downloads it as a CSV: its filters, sort and visible columns, every matching record
-- **Relations** — link any two record types from Settings → Attributes ("each contact has one partner company", "each company has many subsidiaries", a record type to itself included). Both sides appear at once: the single link as a chip you pick from a search, the many side as a list on the record with "+" to link and × to unlink. The single side sorts by the linked record's name; both sides filter with is / is not / empty (a company's built-in Contacts, a contact's Company and Deals too), and a many side also filters and sorts by its count ("Contacts count ≥ 3", most contacts first); deleting a record clears the links to it
+- **Relations** — link any two record types from Settings → Attributes ("each contact has one partner company", "each company has many subsidiaries", a record type to itself included). Both sides appear at once: the single link as a chip you pick from a search, the many side as a list on the record with "+" to link and × to unlink. The single side sorts by the linked record's name; both sides filter with is / is not / empty (a company's built-in Contacts and Deals, a contact's Company and Deals, a deal's Company and Contact too), and a many side also filters and sorts by its count ("Contacts count ≥ 3", most contacts first); deleting a record clears the links to it
 - **Edit in the grid** — click a cell to change it in place: text in an input over the cell (Enter or a click away saves, Escape drops it); a status, an industry (the values already in use, or a new one) or tags from a list under it; linked records from a search that can also create one ("Add "Acme""), and on a many side link and unlink several. Email and phone cells copy on hover. An open record beside the list follows every change
 - **Record grid** — the name column and header stay pinned while you scroll; columns are resizable (drag the divider) and hideable (the `+` at the end of the header), and the layout is saved on the list's view for the whole org; tick rows to export them as CSV or delete them in bulk (with the whole page ticked, Export asks: the selected rows, or every record the list selects); a footer calculates each column over the whole filtered list (count, empty %, unique, sum, average, min/max, earliest/latest), and "+ Add new" sits under the last row
 - **Dual-mode UI** — human-optimized + AI-agent-optimized (`?agent=true`); dark mode follows the OS
@@ -108,6 +108,7 @@ Three entities with foreign key relationships:
 erDiagram
     companies ||--o{ contacts : "has"
     contacts  ||--o{ deals    : "has"
+    companies ||--o{ deals    : "has"
 
     companies {
         text id PK
@@ -136,6 +137,7 @@ erDiagram
         text id PK
         text name
         text contact_id FK "→ contacts · ON DELETE SET NULL"
+        text company_id FK "→ companies · ON DELETE SET NULL"
         real value
         text stage
         text close_date
@@ -148,10 +150,10 @@ erDiagram
 ```sql
 companies (id, name, domain, industry, phone, email, notes)
 contacts  (id, first_name, last_name, email, phone, company_id → companies, title, status)
-deals     (id, name, contact_id → contacts, value, stage, close_date, notes)
+deals     (id, name, contact_id → contacts, company_id → companies, value, stage, close_date, notes)
 ```
 
-Contacts belong to companies. Deals belong to contacts (and inherit the company). Deleting a company sets `company_id` to NULL on its contacts. Deleting a contact sets `contact_id` to NULL on its deals.
+Contacts belong to companies. A deal has its own company and its own contact, both optional: a deal can name a company before it has a person. Setting a contact on a deal with no company gives the deal that contact's company. Deleting a company sets `company_id` to NULL on its contacts and deals. Deleting a contact sets `contact_id` to NULL on its deals.
 
 Custom attributes are real columns, registered in `custom_field_defs`. A relation is two defs, one per side, pointing at each other (`inverse_def_id`). The single side (`many_to_one`) is an indexed column holding the linked record's id, its key ending in `_id`; the many side (`one_to_many`) has no column and is read back from it. Relation columns carry no foreign key, since SQLite can't drop a column that has one; the API clears links when a record is deleted.
 
@@ -175,6 +177,7 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 | DELETE | `/api/companies/:id` | Delete a company |
 | POST | `/api/companies/bulk-delete` | Delete several companies (`{ ids }`) |
 | GET | `/api/deals` | List deals (paginated, sortable, searchable) |
+| GET | `/api/deals/:id` | Get a single deal |
 | POST | `/api/deals` | Create a deal |
 | PUT | `/api/deals/:id` | Update a deal |
 | DELETE | `/api/deals/:id` | Delete a deal |

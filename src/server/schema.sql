@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS deals (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+  -- The deal's own company, independent of its contact: a deal can name a
+  -- company before it has a person, and keeps it if the contact moves on.
+  company_id TEXT REFERENCES companies(id) ON DELETE SET NULL,
   value REAL DEFAULT 0,
   stage TEXT NOT NULL DEFAULT 'prospect',
   close_date TEXT DEFAULT '',
@@ -130,8 +133,17 @@ CREATE TABLE IF NOT EXISTS view_fields (
   PRIMARY KEY (view_id, field_key)
 );
 
+-- One-time data fixes the server has applied, by name (see backfillOnce in
+-- index.ts). This file is DDL only, so a fix that fills existing rows runs in
+-- the app, once, and records itself here so it never runs again.
+CREATE TABLE IF NOT EXISTS data_backfills (
+  key TEXT PRIMARY KEY,
+  applied_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_id);
 CREATE INDEX IF NOT EXISTS idx_deals_contact ON deals(contact_id);
+CREATE INDEX IF NOT EXISTS idx_deals_company ON deals(company_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(status);
 CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage);
 CREATE INDEX IF NOT EXISTS idx_activities_entity ON activities(entity_type, entity_id);

@@ -211,14 +211,25 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
   // ── Deals CRUD ──
 
   const addDeal = useCallback(async (data: Partial<Deal>) => {
-    await api("POST", "/api/deals", data);
+    const { deal } = await api<{ deal: Deal }>("POST", "/api/deals", data);
     await Promise.all([fetchDeals(dealsPag), fetchBoardDeals(), fetchStats()]);
+    return deal;
   }, [dealsPag, fetchDeals, fetchBoardDeals, fetchStats]);
 
+  const fetchDeal = useCallback(async (id: string): Promise<Deal | null> => {
+    try {
+      const data = await api<{ deal: Deal }>("GET", `/api/deals/${encodeURIComponent(id)}`);
+      return data.deal;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // A deal open in the panel re-reads on `changes`, so a stage moved on the board shows there too.
   const updateDeal = useCallback(async (id: string, data: Partial<Deal>) => {
     await api("PUT", `/api/deals/${id}`, data);
-    await Promise.all([fetchDeals(dealsPag), fetchBoardDeals(), fetchStats()]);
-  }, [dealsPag, fetchDeals, fetchBoardDeals, fetchStats]);
+    await Promise.all([fetchDeals(dealsPag), recordsChanged()]);
+  }, [dealsPag, fetchDeals, recordsChanged]);
 
   const deleteDeal = useCallback(async (id: string) => {
     await api("DELETE", `/api/deals/${id}`);
@@ -273,7 +284,7 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     companies, companiesPag, setCompaniesPage: coSet.setPage, setCompaniesSort: coSet.setSort, setCompaniesSearch: coSet.setSearch, setCompaniesFilters: coSet.setFilters, setCompaniesView: coSet.setView,
     addCompany, updateCompany, deleteCompanies,
     deals, dealsPag, dealsTotalValue, setDealsPage: dSet.setPage, setDealsSort: dSet.setSort, setDealsSearch: dSet.setSearch,
-    addDeal, updateDeal, deleteDeal, boardDeals, boardFilters, setBoardFilters,
+    addDeal, fetchDeal, updateDeal, deleteDeal, boardDeals, boardFilters, setBoardFilters,
     connections, emailContact, scheduleMeeting,
     fetchActivities, addNote, importEntity,
     customFields, refetchCustomFields,

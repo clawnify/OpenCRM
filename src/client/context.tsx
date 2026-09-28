@@ -39,7 +39,8 @@ export interface CrmContextValue {
   setDealsPage: (page: number) => void;
   setDealsSort: (col: string) => void;
   setDealsSearch: (search: string) => void;
-  addDeal: (data: Partial<Deal>) => Promise<void>;
+  addDeal: (data: Partial<Deal>) => Promise<Deal>;
+  fetchDeal: (id: string) => Promise<Deal | null>;
   updateDeal: (id: string, data: Partial<Deal>) => Promise<void>;
   deleteDeal: (id: string) => Promise<void>;
   boardDeals: Deal[];
