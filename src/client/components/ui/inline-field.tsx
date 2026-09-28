@@ -21,7 +21,7 @@ export function InlineField({
   value: string | null | undefined;
   placeholder: string;
   onSave: (next: string) => Promise<void> | void;
-  type?: "text" | "email" | "tel";
+  type?: "text" | "email" | "tel" | "number" | "date";
   className?: string;
   displayClassName?: string;
   /** Optional read-mode renderer (e.g. wrap an email in a mailto link). */

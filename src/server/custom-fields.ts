@@ -70,7 +70,7 @@ export function isEntityType(v: string): v is EntityType {
 const BUILTIN_COLUMNS: Record<EntityType, ReadonlySet<string>> = {
   company: new Set(["id", "name", "domain", "industry", "phone", "email", "notes", "created_at", "updated_at"]),
   contact: new Set(["id", "first_name", "last_name", "email", "phone", "company_id", "title", "status", "created_at", "updated_at"]),
-  deal: new Set(["id", "name", "contact_id", "value", "stage", "close_date", "notes", "created_at", "updated_at"]),
+  deal: new Set(["id", "name", "contact_id", "company_id", "value", "stage", "close_date", "notes", "created_at", "updated_at"]),
 };
 
 const KEY_RE = /^[a-z][a-z0-9_]*$/;

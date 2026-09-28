@@ -20,12 +20,13 @@ import { RelationSections } from "@/components/record-relations";
 import type { Deal } from "@/types";
 
 // Radix Select forbids an empty-string item value, so we use a sentinel for the
-// "None" contact option and map it back to null on submit.
+// "None" contact and company options and map it back to null on submit.
 const NO_CONTACT = "__none__";
 
 interface FormState {
   name: string;
   contact_id: string;
+  company_id: string;
   value: string;
   stage: string;
   close_date: string;
@@ -36,6 +37,7 @@ function toForm(deal: Deal | undefined, defaultStage: string): FormState {
   return {
     name: deal?.name ?? "",
     contact_id: deal?.contact_id ?? "",
+    company_id: deal?.company_id ?? "",
     value: deal?.value != null ? String(deal.value) : "",
     stage: deal?.stage || defaultStage,
     close_date: deal?.close_date ?? "",
@@ -54,8 +56,8 @@ export function DealDialog({
 }) {
   const { addDeal, updateDeal, setError, customFields, stages, boardDeals } = useCrm();
   const dealFields = customFields.filter((d) => d.entity_type === "deal");
-  // Deals have no record page, so a deal's one_to_many relations are listed
-  // here, from the board's copy (kept fresh as links change).
+  // A deal's one_to_many relations are listed here too, from the board's copy
+  // (kept fresh as links change).
   const live = deal && (boardDeals.find((d) => d.id === deal.id) ?? deal);
   const [form, setForm] = useState<FormState>(() => toForm(deal, stages[0]?.key ?? ""));
   const [custom, setCustom] = useState<Record<string, unknown>>({});
@@ -80,6 +82,9 @@ export function DealDialog({
       const data: Partial<Deal> = {
         name: form.name.trim(),
         contact_id: form.contact_id === "" ? null : form.contact_id,
+        // Sent only when changed: left alone, the server gives a deal with no
+        // company its contact's company.
+        ...(form.company_id !== (deal?.company_id ?? "") ? { company_id: form.company_id || null } : {}),
         value: parseFloat(form.value) || 0,
         stage: form.stage,
         close_date: form.close_date,
@@ -130,6 +135,27 @@ export function DealDialog({
                   `/api/contacts?limit=20&search=${encodeURIComponent(query)}`,
                 );
                 return contacts.map((c) => ({ value: c.id, label: `${c.first_name} ${c.last_name}`.trim() || "—" }));
+              }}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="company">Company</Label>
+            <Combobox
+              id="company"
+              value={form.company_id === "" ? NO_CONTACT : form.company_id}
+              onChange={(v) => set("company_id", v === NO_CONTACT ? "" : v)}
+              placeholder="None"
+              searchPlaceholder="Search companies…"
+              emptyText="No companies found."
+              options={[{ value: NO_CONTACT, label: "None" }]}
+              valueLabel={deal?.company_name || undefined}
+              onSearch={async (query) => {
+                const { companies } = await api<{ companies: { id: string; name: string }[] }>(
+                  "GET",
+                  `/api/companies?limit=20&search=${encodeURIComponent(query)}`,
+                );
+                return companies.map((c) => ({ value: c.id, label: c.name || "—" }));
               }}
             />
           </div>

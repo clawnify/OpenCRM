@@ -11,13 +11,18 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { withQuery } from "@/hooks/use-router";
 import { api } from "@/api";
 import { formatMoney, colorClasses, cn } from "@/lib/utils";
 import { fieldsFromDefs } from "@/lib/filters";
 import type { Deal, StageDef } from "@/types";
 
-export function DealsBoard() {
-  const { boardDeals, boardFilters, setBoardFilters, stats, dealsTotalValue, updateDeal, deleteDeal, stages, refetchStages, refetchBoard, refetchStats, setError, isAgent, customFields } = useCrm();
+// `openId` is the deal open in the side panel beside the board (`?record=`).
+export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?: { replace?: boolean }) => void; openId?: string }) {
+  const { boardDeals, boardFilters, setBoardFilters, stats, dealsTotalValue, addDeal, updateDeal, deleteDeal, stages, refetchStages, refetchBoard, refetchStats, setError, isAgent, customFields } = useCrm();
+  const openRecord = (id: string) => navigate(withQuery({ record: id }), { replace: !!openId });
 
   // The board has no saved views: filters apply to what it shows, and a card
   // is either on the board or filtered out. Same rules as the lists' filters.
@@ -25,6 +30,7 @@ export function DealsBoard() {
     [
       { key: "name", label: "Name", type: "text", column: "name" },
       { key: "value", label: "Value", type: "number", column: "value" },
+      { key: "company_id", label: "Company", type: "relation", entity: "company", column: "company_id" },
       { key: "contact_id", label: "Contact", type: "relation", entity: "contact", column: "contact_id" },
       { key: "stage", label: "Stage", type: "enum", column: "stage", options: stages.map((s) => ({ label: s.label, value: s.key })) },
       { key: "close_date", label: "Close date", type: "date", column: "close_date" },
@@ -47,23 +53,37 @@ export function DealsBoard() {
     setEditing(undefined);
     setDialogOpen(true);
   };
+
+  // A new deal needs only its name: it is created in the first stage and opens
+  // in the panel, where everything else is filled in place. A required custom
+  // field can't be left for later, so then the full form asks for it up front.
+  const needsForm = customFields.some((d) => d.entity_type === "deal" && d.options.required === true);
+  const createNamed = async (name: string) => {
+    try {
+      const deal = await addDeal({ name });
+      openRecord(deal.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create deal");
+    }
+  };
   const openEdit = (d: Deal) => {
     setEditing(d);
     setDialogOpen(true);
   };
 
-  const addButton = (
+  const addButton = needsForm ? (
     <Button size="sm" onClick={openCreate}>
       <Plus className="size-4" />
       Add deal
     </Button>
-  );
+  ) : <NewDealButton onCreate={createNamed} />;
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
       await deleteDeal(deleteTarget.id);
+      if (deleteTarget.id === openId) navigate(withQuery({ record: null }), { replace: true });
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
@@ -71,7 +91,7 @@ export function DealsBoard() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <PageHeader title="Deals" count={stats.deals}>
         <div className="flex flex-col items-end">
           <div className="section-label">Pipeline value</div>
@@ -138,9 +158,14 @@ export function DealsBoard() {
                         // DESIGN.md: resting card = border only, quiet hover one
                         // tonal step; actions reveal on hover (always visible in
                         // agent mode — never gate an action behind hover there).
-                        <Card key={d.id} className="group/card flex flex-col gap-1.5 p-3 transition-colors hover:bg-secondary/50">
+                        // The name is the card's link to the deal; its ::after
+                        // stretches over the card, and the actions sit above it.
+                        <Card key={d.id} className={cn("group/card relative flex flex-col gap-1.5 p-3 transition-colors hover:bg-secondary/50", d.id === openId && "bg-secondary")}>
                           <div className="flex items-start justify-between gap-2">
-                            <span className="text-sm font-medium">{d.name}</span>
+                            <button type="button" onClick={() => openRecord(d.id)} aria-current={d.id === openId || undefined}
+                              className="text-left text-sm font-medium outline-none after:absolute after:inset-0 after:rounded-[inherit] after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring">
+                              {d.name}
+                            </button>
                             <span className="tabular shrink-0 text-sm font-semibold">{formatMoney(d.value)}</span>
                           </div>
 
@@ -164,7 +189,7 @@ export function DealsBoard() {
 
                           <div className="flex items-center justify-end gap-2">
                             <div className={cn(
-                              "flex items-center transition-opacity",
+                              "relative z-10 flex items-center transition-opacity",
                               isAgent ? "opacity-100" : "opacity-0 group-hover/card:opacity-100 focus-within:opacity-100",
                             )}>
                               <DropdownMenu>
@@ -267,6 +292,45 @@ export function DealsBoard() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** "Add deal" as a name field: Enter creates the deal. */
+function NewDealButton({ onCreate }: { onCreate: (name: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const v = name.trim();
+    if (!v) return;
+    setBusy(true);
+    try {
+      await onCreate(v);
+      setName("");
+      setOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button size="sm">
+          <Plus className="size-4" />
+          Add deal
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72">
+        <form onSubmit={submit} className="flex flex-col gap-2">
+          <Label htmlFor="new-deal-name">Deal name</Label>
+          <Input id="new-deal-name" autoFocus required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme renewal" />
+          <div className="flex justify-end">
+            <Button type="submit" size="sm" disabled={busy || !name.trim()}>{busy ? "Creating…" : "Create deal"}</Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
   );
 }
 

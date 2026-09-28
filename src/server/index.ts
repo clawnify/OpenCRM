@@ -215,6 +215,7 @@ const DealSchema = z.object({
   id: z.string(),
   name: z.string(),
   contact_id: z.string().nullable(),
+  company_id: z.string().nullable(),
   value: z.number(),
   stage: z.string(),
   close_date: z.string(),
@@ -1402,6 +1403,43 @@ app.openapi(deleteStage, async (c) => {
 
 // ── Deals ──────────────────────────────────────────────────────────
 
+// A deal row as every deal route returns it: its own columns plus the names
+// of its contact and of its own company (deals.company_id, not the contact's).
+const DEAL_SELECT = `SELECT d.*,
+       ct.first_name as contact_first_name, ct.last_name as contact_last_name,
+       co.name as company_name, co.domain as company_domain
+  FROM deals d
+  LEFT JOIN contacts ct ON d.contact_id = ct.id
+  LEFT JOIN companies co ON d.company_id = co.id`;
+
+/** The company a contact works at, which a deal takes when it has none of its own. */
+async function contactCompany(contactId: string | null): Promise<string | null> {
+  if (!contactId) return null;
+  return (await get<{ company_id: string | null }>("SELECT company_id FROM contacts WHERE id = ?", [contactId]))?.company_id ?? null;
+}
+
+let dealCompaniesBackfilled = false; // per-isolate fast path
+
+/**
+ * Deals predate deals.company_id: until it existed, a deal showed its
+ * contact's company. Gives those deals that company, once per database, so
+ * they read the same after the column arrives. The marker is written after
+ * the update, so a failed run is retried; it is what stops a later run from
+ * refilling a company someone cleared on purpose.
+ */
+async function backfillDealCompanies(): Promise<void> {
+  if (dealCompaniesBackfilled) return;
+  const done = await get("SELECT key FROM data_backfills WHERE key = 'deals.company_id'");
+  if (!done) {
+    await run(
+      `UPDATE deals SET company_id = (SELECT company_id FROM contacts WHERE contacts.id = deals.contact_id)
+       WHERE company_id IS NULL AND contact_id IS NOT NULL`,
+    );
+    await run("INSERT OR IGNORE INTO data_backfills (key) VALUES ('deals.company_id')");
+  }
+  dealCompaniesBackfilled = true;
+}
+
 const getDealsBoard = createRoute({
   method: "get",
   path: "/api/deals/board",
@@ -1420,18 +1458,10 @@ const getDealsBoard = createRoute({
 app.openapi(getDealsBoard, async (c) => {
   try {
     const q = c.req.valid("query");
+    await backfillDealCompanies();
     const flt = buildFilters(await tableColumns("deals"), q.filters, "d.", tzOffsetOf(q.tz), await manyLinks("deal"));
     const whereSQL = flt.clauses.length ? " WHERE " + flt.clauses.join(" AND ") : "";
-    const rows = await query(
-      `SELECT d.*,
-              ct.first_name as contact_first_name, ct.last_name as contact_last_name,
-              co.name as company_name, co.domain as company_domain
-       FROM deals d
-       LEFT JOIN contacts ct ON d.contact_id = ct.id
-       LEFT JOIN companies co ON ct.company_id = co.id` + whereSQL + `
-       ORDER BY d.created_at ASC`,
-      flt.params,
-    );
+    const rows = await query(DEAL_SELECT + whereSQL + " ORDER BY d.created_at ASC", flt.params);
     return c.json({ deals: await withRelations("deal", rows as Record<string, unknown>[]) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
@@ -1447,6 +1477,7 @@ const listDeals = createRoute({
     query: PaginationQuery.extend({
       stage: z.string().optional().openapi({ description: "Filter by stage key (see GET /api/stages for the pipeline vocabulary)" }),
       contact_id: z.string().optional().openapi({ description: "Filter by contact ID" }),
+      company_id: z.string().optional().openapi({ description: "Filter by company ID" }),
     }),
   },
   responses: {
@@ -1467,12 +1498,14 @@ const listDeals = createRoute({
 app.openapi(listDeals, async (c) => {
   try {
     const q = c.req.valid("query");
+    await backfillDealCompanies();
     const page = Math.max(1, parseInt(q.page || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(q.limit || "25", 10)));
     const offset = (page - 1) * limit;
     const search = (q.search || "").trim();
     const stage = (q.stage || "").trim();
     const contactId = q.contact_id || "";
+    const companyId = q.company_id || "";
 
     let sortCol = q.sort || "id";
     if (!["id", "name", "value", "stage", "close_date", "created_at"].includes(sortCol)) sortCol = "id";
@@ -1494,6 +1527,10 @@ app.openapi(listDeals, async (c) => {
       where.push("d.contact_id = ?");
       params.push(contactId);
     }
+    if (companyId) {
+      where.push("d.company_id = ?");
+      params.push(companyId);
+    }
 
     const whereSQL = where.length ? " WHERE " + where.join(" AND ") : "";
 
@@ -1509,12 +1546,7 @@ app.openapi(listDeals, async (c) => {
     );
 
     const rows = await query(
-      `SELECT d.*,
-              ct.first_name as contact_first_name, ct.last_name as contact_last_name,
-              co.name as company_name, co.domain as company_domain
-       FROM deals d
-       LEFT JOIN contacts ct ON d.contact_id = ct.id
-       LEFT JOIN companies co ON ct.company_id = co.id
+      `${DEAL_SELECT}
        ${whereSQL}
        ORDER BY d.${sortCol} ${order}, d.id
        LIMIT ? OFFSET ?`,
@@ -1538,6 +1570,7 @@ const createDeal = createRoute({
       content: { "application/json": { schema: z.object({
         name: z.string().min(1),
         contact_id: z.string().nullable().optional(),
+        company_id: z.string().nullable().optional().openapi({ description: "The deal's company. Omitted, it is the contact's company" }),
         value: z.union([z.number(), z.string()]).optional(),
         stage: z.string().optional(),
         close_date: z.string().optional(),
@@ -1568,6 +1601,7 @@ app.openapi(createDeal, async (c) => {
     if (!name) return c.json({ error: "Name is required" }, 400);
 
     const contactId = body.contact_id ? String(body.contact_id) : null;
+    const companyId = body.company_id !== undefined ? (body.company_id ? String(body.company_id) : null) : await contactCompany(contactId);
     const value = parseFloat(String(body.value)) || 0;
 
     // Stage must exist; default is the first stage of the pipeline.
@@ -1582,21 +1616,13 @@ app.openapi(createDeal, async (c) => {
 
     const id = crypto.randomUUID();
     await run(
-      "INSERT INTO deals (id, name, contact_id, value, stage, close_date, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [id, name, contactId, value, stageKey, (body.close_date || "").trim(), (body.notes || "").trim()],
+      "INSERT INTO deals (id, name, contact_id, company_id, value, stage, close_date, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, name, contactId, companyId, value, stageKey, (body.close_date || "").trim(), (body.notes || "").trim()],
     );
 
     await applyCustomValues("deal", "deals", id, customValues);
 
-    const inserted = await get(
-      `SELECT d.*, ct.first_name as contact_first_name, ct.last_name as contact_last_name,
-              co.name as company_name, co.domain as company_domain
-       FROM deals d
-       LEFT JOIN contacts ct ON d.contact_id = ct.id
-       LEFT JOIN companies co ON ct.company_id = co.id
-       WHERE d.id = ?`,
-      [id],
-    );
+    const inserted = await get(DEAL_SELECT + " WHERE d.id = ?", [id]);
     return c.json({ deal: await withRelationsOne("deal", inserted) }, 201);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -1615,6 +1641,7 @@ const updateDeal = createRoute({
       content: { "application/json": { schema: z.object({
         name: z.string().optional(),
         contact_id: z.string().nullable().optional(),
+        company_id: z.string().nullable().optional().openapi({ description: "The deal's company. Setting a contact on a deal without one also sets it, to the contact's company" }),
         value: z.union([z.number(), z.string()]).optional(),
         stage: z.string().optional(),
         close_date: z.string().optional(),
@@ -1667,12 +1694,26 @@ app.openapi(updateDeal, async (c) => {
       fields.push("contact_id = ?");
       params.push(body.contact_id ? String(body.contact_id) : null);
     }
+    if (body.company_id !== undefined) {
+      fields.push("company_id = ?");
+      params.push(body.company_id ? String(body.company_id) : null);
+    }
 
     const hasCustom = Object.keys(customValues).length > 0;
     if (fields.length === 0 && !hasCustom) return c.json({ error: "No fields to update" }, 400);
 
-    const exists = await get("SELECT id FROM deals WHERE id = ?", [id]);
+    await backfillDealCompanies();
+    const exists = await get<{ company_id: string | null }>("SELECT id, company_id FROM deals WHERE id = ?", [id]);
     if (!exists) return c.json({ error: "Deal not found" }, 404);
+
+    // A contact set on a deal with no company brings its company along.
+    if (body.contact_id && body.company_id === undefined && !exists.company_id) {
+      const inherited = await contactCompany(String(body.contact_id));
+      if (inherited) {
+        fields.push("company_id = ?");
+        params.push(inherited);
+      }
+    }
 
     if (fields.length > 0) {
       fields.push("updated_at = datetime('now')");
@@ -1681,15 +1722,7 @@ app.openapi(updateDeal, async (c) => {
     }
     await applyCustomValues("deal", "deals", id, customValues);
 
-    const updated = await get<Record<string, unknown>>(
-      `SELECT d.*, ct.first_name as contact_first_name, ct.last_name as contact_last_name,
-              co.name as company_name, co.domain as company_domain
-       FROM deals d
-       LEFT JOIN contacts ct ON d.contact_id = ct.id
-       LEFT JOIN companies co ON ct.company_id = co.id
-       WHERE d.id = ?`,
-      [id],
-    );
+    const updated = await get<Record<string, unknown>>(DEAL_SELECT + " WHERE d.id = ?", [id]);
 
     // Deal just marked won → log it and notify Slack (best-effort, never blocks
     // the update). Fires only when this request set stage='won'.
@@ -2191,6 +2224,19 @@ app.get("/api/contacts/:id", async (c) => {
     );
     if (!contact) return c.json({ error: "Contact not found" }, 404);
     return c.json({ contact: await withRelationsOne("contact", contact) }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+app.get("/api/deals/:id", async (c) => {
+  try {
+    const id = c.req.param("id");
+    if (!id) return c.json({ error: "Not found" }, 404);
+    await backfillDealCompanies();
+    const deal = await get(DEAL_SELECT + " WHERE d.id = ?", [id]);
+    if (!deal) return c.json({ error: "Deal not found" }, 404);
+    return c.json({ deal: await withRelationsOne("deal", deal) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }

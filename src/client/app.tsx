@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Building2, PanelLeft, Users } from "lucide-react";
+import { Building2, Handshake, PanelLeft, Users } from "lucide-react";
 import { AppNav, reportLocation, type AppNavItem } from "@clawnify/app/client";
 import { useCrmState } from "./hooks/use-crm";
 import { CrmContext } from "./context";
@@ -11,6 +11,7 @@ import { ContactDetail } from "./components/contacts/contact-detail";
 import { CompaniesPage } from "./components/companies/companies-page";
 import { CompanyDetail } from "./components/companies/company-detail";
 import { DealsBoard } from "./components/deals/deals-board";
+import { DealDetail } from "./components/deals/deal-detail";
 import { PropertiesPage } from "./components/properties/properties-page";
 import { RecordPanel, RecordPanelHeader } from "./components/record-page";
 
@@ -34,6 +35,7 @@ const SETTINGS: AppNavItem[] = [
 function activeFor(route: Route): string {
   if (route.name === "contact") return "contacts";
   if (route.name === "company") return "companies";
+  if (route.name === "deal") return "deals";
   return route.name;
 }
 
@@ -42,7 +44,7 @@ export function App() {
   const state = useCrmState(isAgent);
   const { path, route, navigate } = useRouter();
   // A list opens its records in a side panel; the record's own path is the full page.
-  const openRecord = route.name === "contacts" || route.name === "companies" ? route.record : undefined;
+  const openRecord = route.name === "contacts" || route.name === "companies" || route.name === "deals" ? route.record : undefined;
 
   // Lets the dashboard restore this exact screen on reload.
   useEffect(() => {
@@ -111,7 +113,18 @@ export function App() {
                 </div>
               )}
               {route.name === "company" && <CompanyDetail id={route.id} navigate={navigate} />}
-              {route.name === "deals" && <DealsBoard />}
+              {route.name === "deals" && (
+                <div className="flex min-h-0 flex-1">
+                  <DealsBoard navigate={navigate} openId={openRecord} />
+                  {openRecord && (
+                    <RecordPanel label="Deal">
+                      <RecordPanelHeader icon={Handshake} label="Deal" onExpand={() => navigate(`/deals/${encodeURIComponent(openRecord)}`)} onClose={() => navigate(withQuery({ record: null }))} />
+                      <DealDetail key={openRecord} id={openRecord} navigate={navigate} panel />
+                    </RecordPanel>
+                  )}
+                </div>
+              )}
+              {route.name === "deal" && <DealDetail id={route.id} navigate={navigate} />}
               {route.name === "properties" && <PropertiesPage />}
               {route.name === "not-found" && (
                 <div className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center">

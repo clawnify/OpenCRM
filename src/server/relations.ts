@@ -160,7 +160,7 @@ export async function manyLinks(entity: EntityType): Promise<Record<string, Many
 /** The built-in links, which predate relation defs: column → the entity it holds. */
 const BUILTIN_LINKS: Partial<Record<EntityType, Record<string, EntityType>>> = {
   contact: { company_id: "company" },
-  deal: { contact_id: "contact" },
+  deal: { contact_id: "contact", company_id: "company" },
 };
 
 /** ORDER BY for a column holding a linked record's id (a many_to_one relation,

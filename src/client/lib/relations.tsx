@@ -95,9 +95,9 @@ export function useRecordNames(wanted: Array<{ entity: EntityType; id: string }>
 
 // ── Chips ─────────────────────────────────────────────────────────────
 
-const LIST_PATH: Partial<Record<EntityType, string>> = { contact: "/contacts", company: "/companies" };
+const LIST_PATH: Partial<Record<EntityType, string>> = { contact: "/contacts", company: "/companies", deal: "/deals" };
 
-/** Where a record opens: its list with the record in the side panel. Deals have no record page. */
+/** Where a record opens: its list (the deals board, for a deal) with the record in the side panel. */
 export function recordHref(entity: EntityType, id: string): string | undefined {
   const base = LIST_PATH[entity];
   return base ? `${base}?record=${encodeURIComponent(id)}` : undefined;

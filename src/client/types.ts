@@ -85,6 +85,7 @@ export interface Deal {
   id: string;
   name: string;
   contact_id: string | null;
+  company_id: string | null;
   value: number;
   stage: string;
   close_date: string;

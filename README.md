@@ -108,6 +108,7 @@ Three entities with foreign key relationships:
 erDiagram
     companies ||--o{ contacts : "has"
     contacts  ||--o{ deals    : "has"
+    companies ||--o{ deals    : "has"
 
     companies {
         text id PK
@@ -136,6 +137,7 @@ erDiagram
         text id PK
         text name
         text contact_id FK "→ contacts · ON DELETE SET NULL"
+        text company_id FK "→ companies · ON DELETE SET NULL"
         real value
         text stage
         text close_date
@@ -148,10 +150,10 @@ erDiagram
 ```sql
 companies (id, name, domain, industry, phone, email, notes)
 contacts  (id, first_name, last_name, email, phone, company_id → companies, title, status)
-deals     (id, name, contact_id → contacts, value, stage, close_date, notes)
+deals     (id, name, contact_id → contacts, company_id → companies, value, stage, close_date, notes)
 ```
 
-Contacts belong to companies. Deals belong to contacts (and inherit the company). Deleting a company sets `company_id` to NULL on its contacts. Deleting a contact sets `contact_id` to NULL on its deals.
+Contacts belong to companies. A deal has its own company and its own contact, both optional: a deal can name a company before it has a person. Setting a contact on a deal with no company gives the deal that contact's company. Deleting a company sets `company_id` to NULL on its contacts and deals. Deleting a contact sets `contact_id` to NULL on its deals.
 
 Custom attributes are real columns, registered in `custom_field_defs`. A relation is two defs, one per side, pointing at each other (`inverse_def_id`). The single side (`many_to_one`) is an indexed column holding the linked record's id, its key ending in `_id`; the many side (`one_to_many`) has no column and is read back from it. Relation columns carry no foreign key, since SQLite can't drop a column that has one; the API clears links when a record is deleted.
 
@@ -175,6 +177,7 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 | DELETE | `/api/companies/:id` | Delete a company |
 | POST | `/api/companies/bulk-delete` | Delete several companies (`{ ids }`) |
 | GET | `/api/deals` | List deals (paginated, sortable, searchable) |
+| GET | `/api/deals/:id` | Get a single deal |
 | POST | `/api/deals` | Create a deal |
 | PUT | `/api/deals/:id` | Update a deal |
 | DELETE | `/api/deals/:id` | Delete a deal |
