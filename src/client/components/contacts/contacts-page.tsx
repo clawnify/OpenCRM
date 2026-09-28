@@ -21,6 +21,8 @@ import { customFieldCopy, customFieldEdit, optionEdit, recordEdit, textEdit } fr
 import { useTableView, useAggregates, listFilterQuery } from "@/hooks/use-table-view";
 import { downloadCsv, exportListCsv, exportViewCsv } from "@/lib/csv";
 import { ExportButton } from "@/components/export-button";
+import { EmailSyncBanner } from "@/components/email-sync/email-sync-banner";
+import { formatDate } from "@/lib/utils";
 import type { Contact } from "@/types";
 
 const dash = <span className="text-muted-foreground">—</span>;
@@ -44,11 +46,12 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
       { key: "count:deals", label: "Deals count", type: "number" },
       { key: "title", label: "Title", type: "text", column: "title" },
       { key: "status", label: "Status", type: "enum", column: "status", options: STATUSES.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })) },
+      { key: "last_contacted_at", label: "Last contacted", type: "date", column: "last_contacted_at" },
       { key: "created_at", label: "Created", type: "date" },
     ],
     contactFields,
   );
-  const view = useTableView("contact", viewParam, { name: 220, email: 220, phone: 150, company: 180, title: 180, status: 130 });
+  const view = useTableView("contact", viewParam, { name: 220, email: 220, phone: 150, company: 180, title: 180, status: 130, last_contacted_at: 150 });
   const listView = useListView({ entity: "contact", table: view, filtersParam, pag: contactsPag, setFilters: setContactsFilters, setView: setContactsView, navigate });
 
   const name: NameColumn<Contact> = {
@@ -90,6 +93,11 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
       key: "status", label: "Status", sort: "status", text: (c) => c.status,
       edit: optionEdit("status", STATUSES.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })), saveCell),
       render: (c) => <CategoryBadge value={c.status} />,
+    },
+    // Kept by the Gmail sync (Settings → Email); not editable here.
+    {
+      key: "last_contacted_at", label: "Last contacted", sort: "last_contacted_at", text: (c) => c.last_contacted_at ?? "",
+      render: (c) => c.last_contacted_at ? <span className="tabular">{formatDate(c.last_contacted_at)}</span> : dash,
     },
     ...contactFields.map((def): RecordColumn<Contact> => def.field_type === "relation" ? { ...relationColumn<Contact>(def), edit: customFieldEdit(def, saveCell, customFields) } : ({
       key: def.key, label: def.label, sort: def.key, kind: columnKind(def.field_type), edit: customFieldEdit(def, saveCell, customFields), copy: customFieldCopy(def),
@@ -201,6 +209,7 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
           </>
         )}
       </PageHeader>
+      <EmailSyncBanner navigate={navigate} />
       <FilterBar
         leading={
           <ViewSwitcher

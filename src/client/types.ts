@@ -73,12 +73,68 @@ export interface Contact {
   company_id: string | null;
   title: string;
   status: string;
+  /** Newest synced email with this contact (Gmail sync); read-only. */
+  last_contacted_at?: string | null;
   company_name?: string | null;
   company_domain?: string | null;
   custom?: Record<string, unknown>; // write payload; on reads, values are flat columns
   relations?: Record<string, RelationValue>; // reads only, keyed by relation field
   created_at: string;
   updated_at: string;
+}
+
+// ── Gmail sync ──
+
+export type EmailVisibility = "metadata" | "subject" | "everything";
+export type EmailAutoCreate = "none" | "sent" | "sent_and_received";
+export type EmailHistory = "3m" | "12m" | "all";
+
+/** A synced mailbox's settings and where its sync is. */
+export interface EmailAccountSettings {
+  mailbox: string;
+  enabled: boolean;
+  labels: string[];
+  history: EmailHistory;
+  visibility: EmailVisibility;
+  auto_create: EmailAutoCreate;
+  exclude_group: boolean;
+  exclude_personal: boolean;
+  blocklist: string[];
+  phase: "idle" | "importing" | "live";
+  synced_until: string | null;
+  contacts_created: number;
+  last_run_at: string | null;
+  last_error: string | null;
+  next_run_at: string | null;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface EmailSyncStatus {
+  /** Gmail (Google Workspace) is connected in Clawnify. */
+  connected: boolean;
+  mailbox: string | null;
+  /** The connection now signs in as another account than the one synced. */
+  mailbox_changed: boolean;
+  account: EmailAccountSettings | null;
+  counts: { emails: number; contacts: number };
+  /** A signed-in person: agents and apps can read, not change settings. */
+  can_configure: boolean;
+}
+
+/** One synced email with a contact, as its mailbox's visibility allows. */
+export interface ContactEmail {
+  id: string;
+  mailbox: string;
+  thread_id: string;
+  sent_at: string;
+  direction: "sent" | "received";
+  from_email: string;
+  from_name: string | null;
+  to_emails: string[];
+  subject: string | null;
+  can_open: boolean;
+  gmail_url: string;
 }
 
 export interface Deal {

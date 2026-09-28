@@ -14,6 +14,7 @@ export type Route =
   | { name: "deals"; record?: string }
   | { name: "deal"; id: string }
   | { name: "properties" }
+  | { name: "email-sync" }
   | { name: "not-found" };
 
 function parse(pathname: string, search: string): Route {
@@ -31,6 +32,7 @@ function parse(pathname: string, search: string): Route {
   const dm = pathname.match(/^\/deals\/([^/]+)$/);
   if (dm) return { name: "deal", id: decodeURIComponent(dm[1]) };
   if (pathname === "/settings/properties") return { name: "properties" };
+  if (pathname === "/settings/email") return { name: "email-sync" };
   return { name: "not-found" };
 }
 

@@ -13,6 +13,7 @@ import { CompanyDetail } from "./components/companies/company-detail";
 import { DealsBoard } from "./components/deals/deals-board";
 import { DealDetail } from "./components/deals/deal-detail";
 import { PropertiesPage } from "./components/properties/properties-page";
+import { EmailSyncPage } from "./components/email-sync/email-sync-page";
 import { RecordPanel, RecordPanelHeader } from "./components/record-page";
 
 // One definition of the navigation. <AppNav> paints it as this app's own
@@ -30,6 +31,7 @@ const RECORDS: AppNavItem[] = [
 ];
 const SETTINGS: AppNavItem[] = [
   { id: "properties", label: "Attributes", href: "/settings/properties", icon: "layers" },
+  { id: "email-sync", label: "Email", href: "/settings/email", icon: "mail" },
 ];
 
 function activeFor(route: Route): string {
@@ -134,6 +136,7 @@ export function App() {
               )}
               {route.name === "deal" && <DealDetail id={route.id} navigate={navigate} />}
               {route.name === "properties" && <PropertiesPage />}
+              {route.name === "email-sync" && <EmailSyncPage />}
               {route.name === "not-found" && (
                 <div className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center">
                   <h1 className="text-xl font-bold tracking-tight">Not found</h1>

@@ -19,6 +19,7 @@ Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with
 - **Three entities** — contacts, companies, and deals with foreign-key relationships (UUID keys, not enumerable ids)
 - **Activity timeline** — every contact/company/deal has a feed; emails, meetings, notes, and deal-won events all log to it
 - **Integrations (Clawnify connections)** — email a contact via Gmail, schedule a Google Calendar meeting, and post to Slack when a deal is won — all through the org's Clawnify connections, no keys in the app
+- **Gmail sync** (Settings → Email): see when you last emailed each contact and their emails on their page. You choose what it imports (all mail or some labels, and how far back), what the team sees (metadata, subjects, or everything), and whether people you email become contacts. Group and personal addresses and a blocklist are skipped. Bodies stay in Gmail: the CRM stores who wrote to whom and when, the subject only if you share it, and turning sync off deletes what it stored
 - **CSV / XLSX import** — upload a spreadsheet, map columns to fields (exact-match auto-mapping), preview, import; company names resolve to existing companies or are created
 - **Deal pipeline** — a board tracking deals through stages (prospect → qualified → proposal → negotiation → won/lost) with per-column totals
 - **Path routing** — deep-linkable views and records: a row opens in a side panel beside the list (`/contacts?record=:id`), and expands to its full page (`/contacts/:id`)
@@ -192,6 +193,12 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 | GET | `/api/records?entity=&search=` | Records by name for a relation picker (or `ids=a,b` to name given ids) |
 | GET | `/api/values?entity=&field=` | The values a column already holds (case-insensitive, up to 200), for a picker that offers them |
 | GET | `/api/contacts/aggregates`, `/api/companies/aggregates` | Column totals over the filtered list (`ops=[{key, op}]` plus the list's `search`/`filters`) |
+| GET | `/api/contacts/:id/emails` | A contact's synced emails, newest first; the subject only if the mailbox shares subjects |
+| GET | `/api/emails/:mailbox/:id` | One email's text, read live from Gmail; only when the mailbox shares everything |
+| GET | `/api/email-sync` | Gmail sync settings and progress (`?check=1` also asks which account the connection signs in as) |
+| PUT | `/api/email-sync` | Change sync settings, or turn sync on or off (signed-in people only; turning off deletes what was synced) |
+| GET | `/api/email-sync/labels` | The mailbox's own Gmail labels, for importing only some |
+| POST | `/api/email-sync/run` | Run a sync now. Also the platform queue's target, which chains runs until the first import is done |
 
 ## Community & Contributions
 

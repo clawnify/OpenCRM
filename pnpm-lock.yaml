@@ -17,6 +17,9 @@ importers:
       '@clawnify/db':
         specifier: ^0.4.2
         version: 0.4.2(@cloudflare/workers-types@4.20260702.1)
+      '@clawnify/queue':
+        specifier: ^0.1.1
+        version: 0.1.1
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -241,6 +244,9 @@ packages:
 
   '@clawnify/integrations@0.4.0':
     resolution: {integrity: sha512-epX7r9VHczmjHJuegsn1ogRM9SG8CsYLsyF6hfxN3uV4nDYjdWazNingZnAgOI+ynVj0ZLV8x2rUnNoUUnSuQw==}
+
+  '@clawnify/queue@0.1.1':
+    resolution: {integrity: sha512-6gfaz4B3rVVFWMB0IjJ0mt3ausETXpiWodRqShMBTRwVtNyCXJ4FO4/f3qc/TYtnA9ZZBPVeBLjbzg5nTqvULw==}
 
   '@clawnify/routes@0.3.0':
     resolution: {integrity: sha512-ALKVoN1ui9KXSSoybSKumEiJ7fTAe793y2HwCPGEkvXlgV29yAGXad8qVOeGYzrKe6KACJ8twFA4uheQrJSmqA==}
@@ -2604,6 +2610,8 @@ snapshots:
       - sqlite3
 
   '@clawnify/integrations@0.4.0': {}
+
+  '@clawnify/queue@0.1.1': {}
 
   '@clawnify/routes@0.3.0(@hono/zod-openapi@0.18.4(hono@4.12.2)(zod@3.25.76))(hono@4.12.2)':
     dependencies:

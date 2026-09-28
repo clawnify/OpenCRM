@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS contacts (
   company_id TEXT REFERENCES companies(id) ON DELETE SET NULL,
   title TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'lead',
+  -- The newest synced email with this contact (email_message_contacts). Kept by
+  -- the Gmail sync, read-only through the API; NULL when nothing is synced.
+  last_contacted_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -140,6 +143,73 @@ CREATE TABLE IF NOT EXISTS data_backfills (
   key TEXT PRIMARY KEY,
   applied_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Gmail sync. A mailbox the CRM reads, keyed by its address: today the org's
+-- default Google connection, later one row per connected account once an org
+-- can connect several (platform: multi-account connections). Settings mirror
+-- the choices made when turning sync on; the rest is where the sync is.
+CREATE TABLE IF NOT EXISTS email_accounts (
+  mailbox TEXT PRIMARY KEY,                 -- the Google account's address
+  enabled INTEGER NOT NULL DEFAULT 0,
+  labels TEXT NOT NULL DEFAULT '[]',        -- JSON label names; [] = all mail
+  history TEXT NOT NULL DEFAULT '12m',      -- first import reaches back '3m' | '12m' | 'all'
+  visibility TEXT NOT NULL DEFAULT 'metadata', -- 'metadata' | 'subject' | 'everything'
+  auto_create TEXT NOT NULL DEFAULT 'sent', -- 'none' | 'sent' | 'sent_and_received'
+  exclude_group INTEGER NOT NULL DEFAULT 1,
+  exclude_personal INTEGER NOT NULL DEFAULT 1,
+  blocklist TEXT NOT NULL DEFAULT '[]',     -- JSON: addresses and @domains never imported
+  phase TEXT NOT NULL DEFAULT 'idle',       -- 'idle' | 'importing' | 'live'
+  import_cursor TEXT,                       -- JSON: where the first import resumes
+  synced_until TEXT,                        -- newest message seen; later syncs start here
+  contacts_created INTEGER NOT NULL DEFAULT 0,
+  last_run_at TEXT,
+  last_error TEXT,
+  running_until TEXT,                       -- a run's lease; a second run waits it out
+  job_id TEXT,                              -- the next scheduled run on the platform queue
+  next_run_at TEXT,
+  updated_by TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- One synced email: who, when and which way. Never the body; the subject only
+-- while the mailbox's visibility shows subjects. Stored only for emails with a
+-- contact, so the CRM holds its relationships, not the whole mailbox.
+CREATE TABLE IF NOT EXISTS email_messages (
+  mailbox TEXT NOT NULL,
+  id TEXT NOT NULL,                         -- Gmail message id, unique within its mailbox
+  thread_id TEXT NOT NULL,
+  sent_at TEXT NOT NULL,                    -- ISO 8601
+  direction TEXT NOT NULL,                  -- 'sent' | 'received'
+  from_email TEXT NOT NULL,
+  from_name TEXT,
+  to_emails TEXT NOT NULL DEFAULT '[]',     -- JSON array of addresses
+  subject TEXT,
+  PRIMARY KEY (mailbox, id)
+);
+
+-- Which contacts an email involves. sent_at is copied so a contact's emails
+-- read in order without a join.
+CREATE TABLE IF NOT EXISTS email_message_contacts (
+  mailbox TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  sent_at TEXT NOT NULL,
+  PRIMARY KEY (mailbox, message_id, contact_id)
+);
+
+-- Contacts whose history has been read from a mailbox, and for which address.
+-- A contact added after the first import, or whose address changed, has no row
+-- and is read on its own the first time its emails are opened.
+CREATE TABLE IF NOT EXISTS email_contact_imports (
+  mailbox TEXT NOT NULL,
+  contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  imported_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (mailbox, contact_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_message_contacts_contact ON email_message_contacts(contact_id, sent_at);
 
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_id);
 CREATE INDEX IF NOT EXISTS idx_deals_contact ON deals(contact_id);
