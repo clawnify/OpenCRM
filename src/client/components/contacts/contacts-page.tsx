@@ -40,6 +40,7 @@ export function ContactsPage({ navigate, openId, viewParam, filtersParam }: { na
   const ai = useAiColumns("contact");
   const aiChips = [
     { key: "first_name", label: "First name" }, { key: "last_name", label: "Last name" }, { key: "email", label: "Email" }, { key: "title", label: "Title" },
+    { key: "company_name", label: "Company" }, { key: "company_domain", label: "Company domain" },
     ...contactFields.filter((d) => d.field_type !== "relation").map((d) => ({ key: d.key, label: d.label })),
   ];
   const filterFields = fieldsFromDefs(
