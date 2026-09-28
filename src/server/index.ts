@@ -1,5 +1,5 @@
-import { createApp, createRoute, widgets, z } from "@clawnify/app";
-import freemailDomains from "free-email-domains";
+import { createApp, createRoute, widgets, z, caller, user } from "@clawnify/app";
+import { verifyDelivery } from "@clawnify/queue";
 import { query, get, run } from "./db.js";
 import type { CredentialBinding } from "@clawnify/connections";
 import { sendEmail, createMeeting, notifySlack, connectionStatus } from "./integrations.js";
@@ -19,6 +19,13 @@ import {
   type EntityType,
   type CustomFieldDef,
 } from "./custom-fields.js";
+import { workEmailDomain, findOrCreateCompanyByDomain } from "./email-domains.js";
+import {
+  connectedMailbox, currentAccount, accountFor, runSync, scheduleRun, ensureScheduled, cancelScheduled, listLabels,
+  purge, restartImport, forgetSubjects, firstStep, contactEmails, importContactIfNeeded, openEmail, counts,
+  VISIBILITIES, AUTO_CREATES, HISTORIES, LIVE_INTERVAL_MS, type EmailAccount,
+} from "./email-sync.js";
+import { normaliseBlocklist } from "./email-sync-rules.js";
 import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, countSQL, countOf, type ManyLink } from "./relations.js";
 
 // In production Clawnify injects the CREDENTIALS broker binding + CLAWNIFY_ORG_ID
@@ -30,6 +37,12 @@ type Env = {
     CREDENTIALS?: CredentialBinding;
     CLAWNIFY_ORG_ID?: string;
     SLACK_CHANNEL?: string;
+    // The org token (injected at build) reaches the platform queue that chains
+    // Gmail sync runs. The URLs are only set off-platform, to point both at a
+    // local stand-in.
+    CLAWNIFY_TOKEN?: string;
+    CLAWNIFY_API_URL?: string;
+    CLAWNIFY_QUEUE_URL?: string;
   };
 };
 
@@ -205,6 +218,7 @@ const ContactSchema = z.object({
   company_id: z.string().nullable(),
   title: z.string(),
   status: z.string(),
+  last_contacted_at: z.string().nullable().optional().openapi({ description: "Newest synced email with this contact (Gmail sync). Read-only" }),
   company_name: z.string().nullable().optional(),
   company_domain: z.string().nullable().optional(),
   created_at: z.string(),
@@ -1962,6 +1976,252 @@ app.post("/api/integrations/meeting", async (c) => {
   }
 });
 
+// ── Gmail sync ─────────────────────────────────────────────────────
+//
+// The org's connected Gmail, read into the CRM: for each email with a contact,
+// who wrote to whom and when (email-sync.ts). The body stays in Gmail. What the
+// team sees of each email is the mailbox's visibility setting, applied here for
+// every caller: people, agents and other apps get the same view.
+//
+// Changing the settings is a person's decision, made in the browser
+// (caller "user"). Agents and apps can read synced emails and trigger a sync,
+// never change what a mailbox shares.
+
+/** Whether this caller may change a mailbox's sync settings. */
+const mayConfigure = (c: Parameters<typeof caller>[0]) => caller(c) === "user" && !!user(c);
+
+function accountView(a: EmailAccount) {
+  return {
+    mailbox: a.mailbox,
+    enabled: !!a.enabled,
+    labels: safeArray(a.labels),
+    history: a.history,
+    visibility: a.visibility,
+    auto_create: a.auto_create,
+    exclude_group: !!a.exclude_group,
+    exclude_personal: !!a.exclude_personal,
+    blocklist: safeArray(a.blocklist),
+    phase: a.phase,
+    synced_until: a.synced_until,
+    contacts_created: a.contacts_created,
+    last_run_at: a.last_run_at,
+    last_error: a.last_error,
+    next_run_at: a.next_run_at,
+    updated_by: a.updated_by,
+    updated_at: a.updated_at,
+  };
+}
+
+function safeArray(v: string | null): unknown[] {
+  try {
+    const parsed = JSON.parse(v ?? "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// The mailbox, its settings and where the sync is. Also the watchdog: an enabled
+// mailbox with no run booked gets one, so a lost queue job heals on next view.
+// `?check=1` also asks Google which account the connection signs in as (the
+// settings page does; the contacts page's banner reads stored state only).
+app.get("/api/email-sync", async (c) => {
+  try {
+    const { email } = await connectionStatus(c.env);
+    let connected: string | null = null;
+    if (email && c.req.query("check") === "1") {
+      try {
+        connected = await connectedMailbox(c.env);
+      } catch {
+        connected = null;
+      }
+    }
+    const account = (connected ? await accountFor(connected) : null) ?? (await currentAccount());
+    const mailbox = connected ?? account?.mailbox ?? null;
+    if (account?.enabled) await ensureScheduled(c.env, new URL(c.req.url).origin, account);
+    return c.json({
+      connected: email,
+      mailbox,
+      // The Google connection now signs in as a different mailbox than the one synced.
+      mailbox_changed: !!(account && connected && connected !== account.mailbox),
+      account: account ? accountView(account) : null,
+      counts: account ? await counts(account.mailbox) : { emails: 0, contacts: 0 },
+      can_configure: mayConfigure(c),
+    }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// Save settings; turning sync on or off is part of the same write. Turning off
+// deletes everything synced from the mailbox. Narrowing what is imported starts
+// the import over; showing less deletes what is no longer shown.
+app.put("/api/email-sync", async (c) => {
+  try {
+    if (!mayConfigure(c)) return c.json({ error: "Only a signed-in person can change email sync settings." }, 403);
+    const body = await c.req.json<Record<string, unknown>>();
+    const who = user(c)?.email ?? user(c)?.id ?? null;
+
+    if (!(await connectionStatus(c.env)).email) return c.json({ error: "Connect Gmail (Google Workspace) in Clawnify first." }, 409);
+    const mailbox = await connectedMailbox(c.env);
+    // One mailbox syncs at a time. If the Google connection now signs in as
+    // another account, what was synced from the old one goes, as when turning off.
+    for (const old of await query<EmailAccount>("SELECT * FROM email_accounts WHERE mailbox != ? AND enabled = 1", [mailbox])) {
+      await cancelScheduled(c.env, old);
+      await purge(old.mailbox);
+      await run("UPDATE email_accounts SET enabled = 0 WHERE mailbox = ?", [old.mailbox]);
+    }
+    const before = await accountFor(mailbox);
+    const pick = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+      const v = body[key];
+      if (v === undefined) return fallback;
+      if (typeof v !== "string" || !allowed.includes(v as T)) throw new SettingsError(`${key} must be one of ${allowed.join(", ")}`);
+      return v as T;
+    };
+    const bool = (key: string, fallback: boolean): boolean => {
+      const v = body[key];
+      if (v === undefined) return fallback;
+      if (typeof v !== "boolean") throw new SettingsError(`${key} must be true or false`);
+      return v;
+    };
+    const labels = body.labels === undefined ? safeArray(before?.labels ?? "[]") : body.labels;
+    if (!Array.isArray(labels) || labels.some((l) => typeof l !== "string" || !l.trim())) throw new SettingsError("labels must be a list of Gmail label names");
+    const blocklist = body.blocklist === undefined ? safeArray(before?.blocklist ?? "[]") : normaliseBlocklist(body.blocklist);
+
+    const next = {
+      enabled: bool("enabled", !!before?.enabled),
+      labels: JSON.stringify([...new Set((labels as string[]).map((l) => l.trim()))]),
+      history: pick("history", HISTORIES, before?.history ?? "12m"),
+      visibility: pick("visibility", VISIBILITIES, before?.visibility ?? "metadata"),
+      auto_create: pick("auto_create", AUTO_CREATES, before?.auto_create ?? "sent"),
+      exclude_group: bool("exclude_group", before ? !!before.exclude_group : true),
+      exclude_personal: bool("exclude_personal", before ? !!before.exclude_personal : true),
+      blocklist: JSON.stringify(blocklist),
+    };
+
+    await run(
+      `INSERT INTO email_accounts (mailbox, enabled, labels, history, visibility, auto_create, exclude_group, exclude_personal, blocklist, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT (mailbox) DO UPDATE SET enabled = excluded.enabled, labels = excluded.labels, history = excluded.history,
+         visibility = excluded.visibility, auto_create = excluded.auto_create, exclude_group = excluded.exclude_group,
+         exclude_personal = excluded.exclude_personal, blocklist = excluded.blocklist, updated_by = excluded.updated_by,
+         updated_at = excluded.updated_at`,
+      [mailbox, next.enabled ? 1 : 0, next.labels, next.history, next.visibility, next.auto_create,
+        next.exclude_group ? 1 : 0, next.exclude_personal ? 1 : 0, next.blocklist, who],
+    );
+    const origin = new URL(c.req.url).origin;
+    const now = new Date();
+
+    if (!next.enabled) {
+      if (before?.enabled) {
+        await cancelScheduled(c.env, before);
+        await purge(mailbox);
+      }
+    } else {
+      const scopeChanged = !!before && (before.labels !== next.labels || before.history !== next.history || before.blocklist !== next.blocklist || before.exclude_group !== (next.exclude_group ? 1 : 0));
+      const showsMore = !!before && VISIBILITIES.indexOf(next.visibility) > VISIBILITIES.indexOf(before.visibility) && before.visibility === "metadata";
+      const createsMore = !!before && (AUTO_CREATES.indexOf(next.auto_create) > AUTO_CREATES.indexOf(before.auto_create) || (!!before.exclude_personal && !next.exclude_personal));
+      if (!before?.enabled) {
+        await restartImport(mailbox, firstStep(next), now);
+      } else if (scopeChanged) {
+        // What counts changed: forget what was imported under the old scope and read it again.
+        await purge(mailbox);
+        await restartImport(mailbox, firstStep(next), now);
+      } else if (createsMore) {
+        await restartImport(mailbox, firstStep(next), now);
+      } else if (showsMore) {
+        // Subjects were never stored at "metadata": read the contacts' emails again to fill them in.
+        await restartImport(mailbox, "people", now);
+      }
+      if (next.visibility === "metadata" && before && before.visibility !== "metadata") await forgetSubjects(mailbox);
+      await scheduleRun(c.env, origin, mailbox, now);
+    }
+
+    const saved = (await accountFor(mailbox))!;
+    return c.json({ account: accountView(saved), counts: await counts(mailbox) }, 200);
+  } catch (err: unknown) {
+    if (err instanceof SettingsError) return c.json({ error: err.message }, 400);
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+class SettingsError extends Error {}
+
+// The mailbox's Gmail labels, for choosing "Some labels" to import.
+app.get("/api/email-sync/labels", async (c) => {
+  try {
+    if (!mayConfigure(c)) return c.json({ error: "Only a signed-in person can change email sync settings." }, 403);
+    return c.json({ labels: await listLabels(c.env) }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// One bounded sync run, then book the next: at once while the first import has
+// work left, otherwise in LIVE_INTERVAL_MS. Called by the platform queue (a
+// signed delivery on a declared public route) or by a person or agent ("Sync
+// now"). Anonymous callers cannot make the app read a mailbox.
+app.post("/api/email-sync/run", async (c) => {
+  const raw = await c.req.text();
+  const signed = await verifyDelivery(raw, {
+    signature: c.req.header("X-Queue-Signature") ?? null,
+    timestamp: c.req.header("X-Queue-Timestamp") ?? null,
+    keyId: c.req.header("X-Queue-Key-Id") ?? null,
+  }).catch(() => false);
+  const who = caller(c);
+  if (!signed && who !== "user" && who !== "api" && who !== "agent") {
+    return c.json({ error: "Sign in to run a sync." }, 403);
+  }
+  try {
+    let mailbox: string | undefined;
+    try {
+      mailbox = (JSON.parse(raw || "{}") as { mailbox?: string }).mailbox;
+    } catch {
+      mailbox = undefined;
+    }
+    mailbox = mailbox ?? (await currentAccount())?.mailbox;
+    if (!mailbox) return c.json({ status: "off" }, 200);
+
+    const result = await runSync(c.env, mailbox);
+    const origin = new URL(c.req.url).origin;
+    if (result.status === "ran" || result.status === "error") {
+      const delay = result.status === "error" ? 10 * 60_000 : result.more ? 0 : LIVE_INTERVAL_MS;
+      await scheduleRun(c.env, origin, mailbox, new Date(Date.now() + delay));
+    }
+    const account = await accountFor(mailbox);
+    return c.json({ ...result, account: account ? accountView(account) : null, counts: await counts(mailbox) }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// A contact's synced emails, as the mailbox's visibility allows. A contact added
+// after the first import has its history read here, once.
+app.get("/api/contacts/:id/emails", async (c) => {
+  try {
+    const id = c.req.param("id");
+    try {
+      await importContactIfNeeded(c.env, id);
+    } catch {
+      /* Gmail unreachable: show what is already synced */
+    }
+    return c.json({ ...(await contactEmails(id)), sync_on: !!(await currentAccount())?.enabled }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// One email's text, read live from Gmail when the mailbox shares everything. Never stored.
+app.get("/api/emails/:mailbox/:id", async (c) => {
+  try {
+    const result = await openEmail(c.env, decodeURIComponent(c.req.param("mailbox")).toLowerCase(), c.req.param("id"));
+    if ("error" in result) return c.json({ error: result.error }, result.status);
+    return c.json(result, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 // ── Contact import (CSV / XLSX, mapped client-side) ────────────────
 // The client parses the file and maps headers → fields, then posts clean rows
 // here. Company names resolve to ids (reusing existing, creating new), then the
@@ -1986,39 +2246,6 @@ const LOOKUP_CHUNK = 100; // one-param `name IN (…)` lookups
 // D1 caps bound parameters at 100 per query, so chunk at 100/5 = 20 rows.
 const COMPANY_COLS = 5;
 const COMPANY_INSERT_CHUNK = Math.floor(100 / COMPANY_COLS); // 20 rows/stmt → 100 params ≤ 100
-
-// Personal/free email providers (gmail, outlook, …) — a company is never
-// inferred from these, else every import would spawn a "Gmail" company. Sourced
-// from the maintained `free-email-domains` list (~12.8k domains) so it stays
-// current via dependency bumps rather than hand-curation.
-const FREEMAIL_DOMAINS = new Set(freemailDomains.map((d) => d.toLowerCase()));
-
-// The domain of a work email, or "" if it has none or is a free provider.
-function workEmailDomain(email: string): string {
-  const at = email.lastIndexOf("@");
-  if (at < 0) return "";
-  const domain = email.slice(at + 1).trim().toLowerCase();
-  if (!domain || !domain.includes(".")) return "";
-  return FREEMAIL_DOMAINS.has(domain) ? "" : domain;
-}
-
-/** Find a company whose stored domain resolves to `domain` (tolerating
- *  protocol / www / trailing slash), else create a lightweight one named after
- *  the domain. Used to auto-link a contact to a company from its work email. */
-async function findOrCreateCompanyByDomain(domain: string): Promise<string> {
-  const existing = await get<{ id: string }>(
-    `SELECT id FROM companies
-      WHERE lower(replace(replace(replace(rtrim(domain,'/'),'https://',''),'http://',''),'www.','')) = ?
-      LIMIT 1`,
-    [domain],
-  );
-  if (existing) return existing.id;
-  const id = crypto.randomUUID();
-  const sld = domain.split(".")[0] || domain;
-  const name = sld.charAt(0).toUpperCase() + sld.slice(1);
-  await run("INSERT INTO companies (id, name, domain) VALUES (?, ?, ?)", [id, name, domain]);
-  return id;
-}
 
 // A first-guess company name from a domain: "acme.com" → "Acme". Crude but
 // editable post-import, matching how HubSpot seeds domain-derived companies.

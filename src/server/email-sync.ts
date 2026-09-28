@@ -1,0 +1,592 @@
+// Gmail sync: reads the org's connected mailbox and keeps, for every email with
+// a contact, who wrote to whom and when. The body never leaves Gmail; the
+// subject is stored only while the mailbox's visibility shows it. The rules
+// (who counts, which searches) live in email-sync-rules.ts; this file is the
+// I/O around them.
+//
+// First import, in steps, resumable from `import_cursor`:
+//   1. sent      people you emailed become contacts (auto_create sent or wider)
+//   2. received  people who emailed you become contacts (sent_and_received)
+//   3. people    every contact's emails, 20 contacts per Gmail search
+// Then `live`: every run reads the mail that arrived since `synced_until`.
+// Runs are short (RUN_BUDGET_MS) and chained through the platform queue, so an
+// import of a large mailbox continues after the page that started it closes.
+
+import { connect, type ConnectionsEnv } from "@clawnify/connections";
+import { get, query, run } from "./db.js";
+import { SERVICES } from "./integrations.js";
+import { workEmailDomain, findOrCreateCompanyByDomain, FREEMAIL_DOMAINS } from "./email-domains.js";
+import {
+  parseAddresses, isGroupAddress, isBlocked, normaliseBlocklist, creationCandidates, splitName,
+  historyStart, sentQuery, receivedQuery, peopleQuery, sinceQuery,
+  type Address, type AutoCreate, type History, type CreateRules, type Scope,
+} from "./email-sync-rules.js";
+
+export type Visibility = "metadata" | "subject" | "everything";
+export const VISIBILITIES: Visibility[] = ["metadata", "subject", "everything"];
+export const AUTO_CREATES: AutoCreate[] = ["none", "sent", "sent_and_received"];
+export const HISTORIES: History[] = ["3m", "12m", "all"];
+
+export interface EmailAccount {
+  mailbox: string;
+  enabled: number;
+  labels: string;
+  history: History;
+  visibility: Visibility;
+  auto_create: AutoCreate;
+  exclude_group: number;
+  exclude_personal: number;
+  blocklist: string;
+  phase: "idle" | "importing" | "live";
+  import_cursor: string | null;
+  synced_until: string | null;
+  contacts_created: number;
+  last_run_at: string | null;
+  last_error: string | null;
+  running_until: string | null;
+  job_id: string | null;
+  next_run_at: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Cursor {
+  step: "sent" | "received" | "people" | "live";
+  page?: string | null;
+  after_contact?: string;
+  batch?: Array<{ id: string; email: string }>;
+  /** When this import began. Live sync starts here, so mail that arrives while
+   *  a long import runs is read afterwards rather than skipped. */
+  started_at?: string;
+  /** The newest message a live pass has seen; becomes synced_until when the pass ends. */
+  max_seen?: string;
+}
+
+function firstStep(a: Pick<EmailAccount, "auto_create">): Cursor["step"] {
+  return a.auto_create === "none" ? "people" : "sent";
+}
+
+/** Wall-clock budget of one run. Gmail reads are I/O, so this bounds waiting, not CPU. */
+const RUN_BUDGET_MS = 20_000;
+/** A run's lease outlives its budget, so a crashed run frees the mailbox soon after. */
+const LEASE_MS = 90_000;
+const PAGE_SIZE = 100;
+const PEOPLE_BATCH = 20;
+/** Once live, how often new mail is read. */
+export const LIVE_INTERVAL_MS = 15 * 60_000;
+
+// shortcut: the org's default Google connection. Once an org can connect several
+// accounts (platform: multi-account connections), pass { account: mailbox } so
+// each email_accounts row reads its own connection.
+function gmail(env: ConnectionsEnv) {
+  return connect(SERVICES.email, env);
+}
+
+/** The address of the mailbox the org's Google connection signs in as. */
+export async function connectedMailbox(env: ConnectionsEnv): Promise<string> {
+  const data = (await gmail(env).run("GOOGLESUPER_GET_PROFILE", { user_id: "me" })) as { emailAddress?: string } | null;
+  const address = (data?.emailAddress ?? "").trim().toLowerCase();
+  if (!address) throw new Error("The connected Google account did not report its address");
+  return address;
+}
+
+/** The mailbox's labels, for choosing which ones to import. System labels
+ *  (INBOX, SENT, CATEGORY_*…) are left out: "Everything" already covers them. */
+export async function listLabels(env: ConnectionsEnv): Promise<Array<{ id: string; name: string }>> {
+  const data = (await gmail(env).run("GOOGLESUPER_LIST_LABELS", { user_id: "me" })) as {
+    labels?: Array<{ id?: string; name?: string; type?: string }>;
+  } | null;
+  return (data?.labels ?? [])
+    .filter((l) => l.type !== "system" && l.id && l.name)
+    .map((l) => ({ id: l.id!, name: l.name! }))
+    .sort((x, y) => x.name.localeCompare(y.name));
+}
+
+interface GmailMessage {
+  messageId: string;
+  threadId: string;
+  messageTimestamp: string;
+  sender?: string;
+  to?: string;
+  subject?: string;
+  labelIds?: string[];
+}
+
+/** One page of a Gmail search, headers only. The preview snippet the API also
+ *  returns is dropped here, so no body text reaches this app. */
+async function fetchPage(env: ConnectionsEnv, q: string, page: string | null | undefined, max = PAGE_SIZE) {
+  const data = (await gmail(env).run("GOOGLESUPER_FETCH_EMAILS", {
+    query: q,
+    max_results: max,
+    verbose: false,
+    include_payload: false,
+    ...(page ? { page_token: page } : {}),
+  })) as { messages?: GmailMessage[]; nextPageToken?: string } | null;
+  const messages = (data?.messages ?? []).map((m) => ({
+    messageId: m.messageId,
+    threadId: m.threadId,
+    messageTimestamp: m.messageTimestamp,
+    sender: m.sender,
+    to: m.to,
+    subject: m.subject,
+    labelIds: m.labelIds ?? [],
+  }));
+  return { messages, next: data?.nextPageToken || null };
+}
+
+interface Parsed {
+  id: string;
+  threadId: string;
+  sentAt: string;
+  direction: "sent" | "received";
+  from: Address | null;
+  to: Address[];
+  subject: string;
+  labelIds: string[];
+}
+
+function parse(m: GmailMessage & { labelIds: string[] }, mailbox: string): Parsed | null {
+  if (!m.messageId || !m.threadId || !m.messageTimestamp) return null;
+  const from = parseAddresses(m.sender)[0] ?? null;
+  const sent = m.labelIds.includes("SENT") || from?.email === mailbox;
+  return {
+    id: m.messageId,
+    threadId: m.threadId,
+    sentAt: m.messageTimestamp,
+    direction: sent ? "sent" : "received",
+    from,
+    to: parseAddresses(m.to),
+    subject: m.subject ?? "",
+    labelIds: m.labelIds,
+  };
+}
+
+// ── Settings rows ──────────────────────────────────────────────────
+
+/** v1 syncs one mailbox at a time, the org's default connection; the table
+ *  allows more. The enabled one wins, then the most recently changed. */
+export async function currentAccount(): Promise<EmailAccount | null> {
+  return (await get<EmailAccount>("SELECT * FROM email_accounts ORDER BY enabled DESC, updated_at DESC LIMIT 1")) ?? null;
+}
+
+export async function accountFor(mailbox: string): Promise<EmailAccount | null> {
+  return (await get<EmailAccount>("SELECT * FROM email_accounts WHERE mailbox = ?", [mailbox])) ?? null;
+}
+
+function scopeOf(a: EmailAccount, now: Date): Scope {
+  return { labels: jsonArray(a.labels).filter((l): l is string => typeof l === "string"), since: historyStart(a.history, now) };
+}
+
+function rulesOf(a: EmailAccount): CreateRules {
+  return {
+    mailbox: a.mailbox,
+    policy: a.auto_create,
+    excludeGroup: !!a.exclude_group,
+    excludePersonal: !!a.exclude_personal,
+    blocklist: normaliseBlocklist(jsonArray(a.blocklist)),
+    isPersonalDomain: (d) => FREEMAIL_DOMAINS.has(d),
+  };
+}
+
+function jsonArray(v: string | null): unknown[] {
+  try {
+    const parsed = JSON.parse(v ?? "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// ── Contacts ───────────────────────────────────────────────────────
+
+/** Every contact's address → id, read once per run and kept current as the run adds contacts. */
+async function contactIndex(): Promise<Map<string, string>> {
+  const rows = await query<{ id: string; email: string }>("SELECT id, email FROM contacts WHERE email IS NOT NULL AND email != ''");
+  const index = new Map<string, string>();
+  for (const r of rows) index.set(r.email.trim().toLowerCase(), r.id);
+  return index;
+}
+
+/** A contact for someone the mailbox wrote to (or heard from), linked to their
+ *  company by work domain the way import and create already do. */
+async function createContact(person: Address): Promise<string> {
+  const { first, last } = splitName(person);
+  const domain = workEmailDomain(person.email);
+  const companyId = domain ? await findOrCreateCompanyByDomain(domain) : null;
+  const id = crypto.randomUUID();
+  await run("INSERT INTO contacts (id, first_name, last_name, email, company_id) VALUES (?, ?, ?, ?, ?)", [id, first, last, person.email, companyId]);
+  return id;
+}
+
+async function recomputeLastContacted(contactIds: Iterable<string>): Promise<void> {
+  const ids = [...new Set(contactIds)];
+  for (let i = 0; i < ids.length; i += 90) {
+    const part = ids.slice(i, i + 90);
+    await run(
+      `UPDATE contacts SET last_contacted_at =
+         (SELECT MAX(l.sent_at) FROM email_message_contacts l WHERE l.contact_id = contacts.id)
+       WHERE id IN (${part.map(() => "?").join(", ")})`,
+      part,
+    );
+  }
+}
+
+// ── Storing ────────────────────────────────────────────────────────
+
+/** Keeps the messages that involve a contact, links them, and returns the contacts touched. */
+async function storeAndLink(a: EmailAccount, messages: Parsed[], index: Map<string, string>): Promise<Set<string>> {
+  const rules = rulesOf(a);
+  const touched = new Set<string>();
+  for (const m of messages) {
+    if (m.from && isBlocked(m.from.email, rules.blocklist)) continue;
+    if (m.direction === "received" && rules.excludeGroup && m.from && isGroupAddress(m.from.email)) continue;
+    const people = [m.from, ...m.to].filter((p): p is Address => !!p && p.email !== a.mailbox && !isBlocked(p.email, rules.blocklist));
+    const contactIds = [...new Set(people.map((p) => index.get(p.email)).filter((id): id is string => !!id))];
+    if (!contactIds.length) continue;
+    const subject = a.visibility === "metadata" ? null : m.subject;
+    await run(
+      `INSERT INTO email_messages (mailbox, id, thread_id, sent_at, direction, from_email, from_name, to_emails, subject)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (mailbox, id) DO UPDATE SET subject = excluded.subject`,
+      [a.mailbox, m.id, m.threadId, m.sentAt, m.direction, m.from?.email ?? "", m.from?.name ?? null, JSON.stringify(m.to.map((t) => t.email)), subject],
+    );
+    for (const cid of contactIds) {
+      await run("INSERT OR IGNORE INTO email_message_contacts (mailbox, message_id, contact_id, sent_at) VALUES (?, ?, ?, ?)", [a.mailbox, m.id, cid, m.sentAt]);
+      touched.add(cid);
+    }
+  }
+  return touched;
+}
+
+/** Adds contacts for the people these messages bring in under the account's policy. */
+async function createFrom(a: EmailAccount, messages: Parsed[], index: Map<string, string>): Promise<number> {
+  const rules = rulesOf(a);
+  let created = 0;
+  for (const m of messages) {
+    for (const person of creationCandidates(m, rules)) {
+      if (index.has(person.email)) continue;
+      index.set(person.email, await createContact(person));
+      created++;
+    }
+  }
+  return created;
+}
+
+function later(a: string | undefined, b: string): string {
+  return !a || b > a ? b : a;
+}
+
+// ── Running ────────────────────────────────────────────────────────
+
+/** Takes the mailbox for one run, or null when another run holds it. */
+async function claim(mailbox: string, now: Date): Promise<boolean> {
+  const rows = await query<{ mailbox: string }>(
+    `UPDATE email_accounts SET running_until = ?
+      WHERE mailbox = ? AND enabled = 1 AND (running_until IS NULL OR running_until < ?)
+      RETURNING mailbox`,
+    [new Date(now.getTime() + LEASE_MS).toISOString(), mailbox, now.toISOString()],
+  );
+  return rows.length === 1;
+}
+
+export interface RunResult {
+  status: "ran" | "busy" | "off" | "error";
+  phase?: EmailAccount["phase"];
+  step?: Cursor["step"];
+  created?: number;
+  stored?: number;
+  more?: boolean;
+  error?: string;
+}
+
+/**
+ * One bounded run: continue the first import, or read new mail once live.
+ * `more` says whether work is left that should run again right away.
+ */
+export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Date()): Promise<RunResult> {
+  const a = await accountFor(mailbox);
+  if (!a || !a.enabled) return { status: "off" };
+  if (!(await claim(mailbox, now))) return { status: "busy" };
+
+  const started = Date.now();
+  let created = 0;
+  let stored = 0;
+  let cursor: Cursor = parseCursor(a.import_cursor) ?? { step: firstStep(a), started_at: now.toISOString() };
+  let phase = a.phase === "idle" ? "importing" : a.phase;
+  try {
+    // Never write one mailbox's mail under another's settings: if the org's
+    // Google connection now signs in as someone else, stop and say so.
+    const connected = await connectedMailbox(env);
+    if (connected !== a.mailbox) {
+      throw new Error(`The connected Google account is now ${connected}, not ${a.mailbox}. Open Email settings to switch.`);
+    }
+
+    const scope = scopeOf(a, now);
+    const index = await contactIndex();
+    const touched = new Set<string>();
+
+    while (Date.now() - started < RUN_BUDGET_MS) {
+      if (cursor.step === "sent" || cursor.step === "received") {
+        const q = cursor.step === "sent" ? sentQuery(scope) : receivedQuery(scope);
+        const { messages, next } = await fetchPage(env, q, cursor.page);
+        created += await createFrom(a, messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m), index);
+        if (next) cursor = { ...cursor, page: next };
+        else cursor = { step: cursor.step === "sent" && a.auto_create === "sent_and_received" ? "received" : "people", started_at: cursor.started_at };
+        continue;
+      }
+
+      if (cursor.step === "people") {
+        if (!cursor.batch?.length) {
+          const batch = await query<{ id: string; email: string }>(
+            `SELECT id, lower(trim(email)) AS email FROM contacts
+              WHERE email IS NOT NULL AND email != '' AND id > ?
+              ORDER BY id LIMIT ?`,
+            [cursor.after_contact ?? "", PEOPLE_BATCH],
+          );
+          if (!batch.length) {
+            phase = "live";
+            a.synced_until = cursor.started_at ?? now.toISOString();
+            cursor = { step: "live" };
+            break; // the first live read runs on the next delivery
+          }
+          cursor = { ...cursor, batch, page: null };
+        }
+        const emails = cursor.batch!.map((b) => b.email).filter((e) => !isBlocked(e, rulesOf(a).blocklist));
+        const { messages, next } = emails.length ? await fetchPage(env, peopleQuery(emails, scope), cursor.page) : { messages: [], next: null };
+        const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
+        for (const cid of await storeAndLink(a, parsed, index)) touched.add(cid);
+        stored += parsed.length;
+        if (next) {
+          cursor = { ...cursor, page: next };
+        } else {
+          for (const b of cursor.batch!) {
+            await run(
+              `INSERT INTO email_contact_imports (mailbox, contact_id, email) VALUES (?, ?, ?)
+               ON CONFLICT (mailbox, contact_id) DO UPDATE SET email = excluded.email, imported_at = datetime('now')`,
+              [a.mailbox, b.id, b.email],
+            );
+          }
+          cursor = { step: "people", after_contact: cursor.batch![cursor.batch!.length - 1].id, started_at: cursor.started_at };
+        }
+        continue;
+      }
+
+      // live: everything since the last sync, all pages, then move the mark.
+      const since = new Date(a.synced_until ?? now.toISOString());
+      const { messages, next } = await fetchPage(env, sinceQuery(since, scope), cursor.page);
+      const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
+      created += await createFrom(a, parsed, index);
+      for (const cid of await storeAndLink(a, parsed, index)) touched.add(cid);
+      stored += parsed.length;
+      for (const m of parsed) cursor.max_seen = later(cursor.max_seen, m.sentAt);
+      if (next) {
+        cursor = { ...cursor, page: next };
+        continue;
+      }
+      if (cursor.max_seen) a.synced_until = later(a.synced_until ?? undefined, cursor.max_seen);
+      cursor = { step: "live" };
+      break;
+    }
+
+    await recomputeLastContacted(touched);
+    const more = phase === "importing" || !!cursor.page;
+    await run(
+      `UPDATE email_accounts SET phase = ?, import_cursor = ?, synced_until = ?, contacts_created = contacts_created + ?,
+              last_run_at = ?, last_error = NULL, running_until = NULL WHERE mailbox = ?`,
+      [phase, JSON.stringify(cursor), a.synced_until, created, now.toISOString(), a.mailbox],
+    );
+    return { status: "ran", phase, step: cursor.step, created, stored, more };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Sync failed";
+    await run(
+      "UPDATE email_accounts SET import_cursor = ?, contacts_created = contacts_created + ?, last_run_at = ?, last_error = ?, running_until = NULL WHERE mailbox = ?",
+      [JSON.stringify(cursor), created, now.toISOString(), message, a.mailbox],
+    );
+    return { status: "error", phase, step: cursor.step, created, stored, error: message };
+  }
+}
+
+function parseCursor(v: string | null): Cursor | null {
+  try {
+    const c = JSON.parse(v ?? "null");
+    return c && typeof c === "object" && typeof c.step === "string" ? (c as Cursor) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Scheduling ─────────────────────────────────────────────────────
+
+type QueueEnv = { CLAWNIFY_TOKEN?: string; CLAWNIFY_QUEUE_URL?: string };
+
+/**
+ * Books the next run on the platform queue. The key is the app's host, the
+ * mailbox and the target minute, so two requests noticing the same gap book one
+ * job. Unavailable queue (local dev, an outage) is not an error: the next page
+ * load or "Sync now" books again.
+ */
+export async function scheduleRun(env: QueueEnv, origin: string, mailbox: string, runAt: Date): Promise<void> {
+  try {
+    const { enqueueJob } = await import("@clawnify/queue");
+    const job = await enqueueJob(env, {
+      targetUrl: `${origin}/api/email-sync/run`,
+      payload: { mailbox },
+      runAt,
+      idempotencyKey: `crm-email-${new URL(origin).host}-${mailbox}-${runAt.toISOString().slice(0, 16)}`,
+      maxAttempts: 3,
+    });
+    await run("UPDATE email_accounts SET job_id = ?, next_run_at = ? WHERE mailbox = ?", [job.id, runAt.toISOString(), mailbox]);
+  } catch {
+    /* no queue: the watchdog in ensureScheduled books it later */
+  }
+}
+
+/** Books a run when an enabled mailbox has none coming, or its booking is long overdue. */
+export async function ensureScheduled(env: QueueEnv, origin: string, a: EmailAccount, now = new Date()): Promise<void> {
+  if (!a.enabled) return;
+  const overdue = !a.next_run_at || new Date(a.next_run_at).getTime() < now.getTime() - 5 * 60_000;
+  if (overdue) await scheduleRun(env, origin, a.mailbox, now);
+}
+
+export async function cancelScheduled(env: QueueEnv, a: EmailAccount): Promise<void> {
+  if (!a.job_id) return;
+  try {
+    const { cancelJob } = await import("@clawnify/queue");
+    await cancelJob(env, a.job_id);
+  } catch {
+    /* already delivered or gone */
+  }
+}
+
+// ── Changing settings ──────────────────────────────────────────────
+
+/** Deletes everything synced from a mailbox and resets its progress. */
+export async function purge(mailbox: string): Promise<void> {
+  const affected = await query<{ contact_id: string }>("SELECT DISTINCT contact_id FROM email_message_contacts WHERE mailbox = ?", [mailbox]);
+  await run("DELETE FROM email_message_contacts WHERE mailbox = ?", [mailbox]);
+  await run("DELETE FROM email_messages WHERE mailbox = ?", [mailbox]);
+  await run("DELETE FROM email_contact_imports WHERE mailbox = ?", [mailbox]);
+  await recomputeLastContacted(affected.map((r) => r.contact_id));
+  await run(
+    "UPDATE email_accounts SET phase = 'idle', import_cursor = NULL, synced_until = NULL, next_run_at = NULL, job_id = NULL WHERE mailbox = ?",
+    [mailbox],
+  );
+}
+
+/** Restarts the first import at `step` (messages already stored are kept and refreshed). */
+export async function restartImport(mailbox: string, step: Cursor["step"], now = new Date()): Promise<void> {
+  const cursor: Cursor = { step, started_at: now.toISOString() };
+  await run(
+    "UPDATE email_accounts SET phase = 'importing', import_cursor = ?, next_run_at = NULL WHERE mailbox = ?",
+    [JSON.stringify(cursor), mailbox],
+  );
+}
+
+export { firstStep };
+
+export async function forgetSubjects(mailbox: string): Promise<void> {
+  await run("UPDATE email_messages SET subject = NULL WHERE mailbox = ?", [mailbox]);
+}
+
+// ── Reading ────────────────────────────────────────────────────────
+
+export interface ContactEmail {
+  id: string;
+  mailbox: string;
+  thread_id: string;
+  sent_at: string;
+  direction: "sent" | "received";
+  from_email: string;
+  from_name: string | null;
+  to_emails: string[];
+  subject: string | null;
+  can_open: boolean;
+  gmail_url: string;
+}
+
+/**
+ * A contact's synced emails, newest first, as the mailbox's visibility allows:
+ * the subject only above "metadata", the body (via openEmail) only at
+ * "everything". Every caller gets this same view, people and agents alike.
+ */
+export async function contactEmails(contactId: string, limit = 50): Promise<{ emails: ContactEmail[]; total: number }> {
+  const rows = await query<{
+    id: string; mailbox: string; thread_id: string; sent_at: string; direction: "sent" | "received";
+    from_email: string; from_name: string | null; to_emails: string; subject: string | null; visibility: Visibility;
+  }>(
+    `SELECT m.id, m.mailbox, m.thread_id, m.sent_at, m.direction, m.from_email, m.from_name, m.to_emails, m.subject, a.visibility
+       FROM email_message_contacts l
+       JOIN email_messages m ON m.mailbox = l.mailbox AND m.id = l.message_id
+       JOIN email_accounts a ON a.mailbox = m.mailbox AND a.enabled = 1
+      WHERE l.contact_id = ?
+      ORDER BY m.sent_at DESC
+      LIMIT ?`,
+    [contactId, limit],
+  );
+  const total = (await get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM email_message_contacts l JOIN email_accounts a ON a.mailbox = l.mailbox AND a.enabled = 1 WHERE l.contact_id = ?`,
+    [contactId],
+  ))?.n ?? 0;
+  return {
+    total,
+    emails: rows.map((r) => ({
+      id: r.id,
+      mailbox: r.mailbox,
+      thread_id: r.thread_id,
+      sent_at: r.sent_at,
+      direction: r.direction,
+      from_email: r.from_email,
+      from_name: r.from_name,
+      to_emails: jsonArray(r.to_emails).filter((e): e is string => typeof e === "string"),
+      subject: r.visibility === "metadata" ? null : r.subject,
+      can_open: r.visibility === "everything",
+      gmail_url: `https://mail.google.com/mail/u/${encodeURIComponent(r.mailbox)}/#all/${r.thread_id}`,
+    })),
+  };
+}
+
+/**
+ * A contact added after the first import (or whose address changed) has no
+ * history yet: read it now with one search. Runs only once per address.
+ */
+export async function importContactIfNeeded(env: ConnectionsEnv, contactId: string, now = new Date()): Promise<void> {
+  const a = await currentAccount();
+  if (!a || !a.enabled || a.phase !== "live") return;
+  const contact = await get<{ email: string }>("SELECT lower(trim(email)) AS email FROM contacts WHERE id = ?", [contactId]);
+  if (!contact?.email) return;
+  const done = await get<{ email: string }>("SELECT email FROM email_contact_imports WHERE mailbox = ? AND contact_id = ?", [a.mailbox, contactId]);
+  if (done?.email === contact.email) return;
+  if (isBlocked(contact.email, rulesOf(a).blocklist)) return;
+
+  const { messages } = await fetchPage(env, peopleQuery([contact.email], scopeOf(a, now)), null);
+  const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
+  const index = new Map([[contact.email, contactId]]);
+  await storeAndLink(a, parsed, index);
+  await recomputeLastContacted([contactId]);
+  await run(
+    `INSERT INTO email_contact_imports (mailbox, contact_id, email) VALUES (?, ?, ?)
+     ON CONFLICT (mailbox, contact_id) DO UPDATE SET email = excluded.email, imported_at = datetime('now')`,
+    [a.mailbox, contactId, contact.email],
+  );
+}
+
+/** One email's text, read live from Gmail and never stored. Only at "everything". */
+export async function openEmail(env: ConnectionsEnv, mailbox: string, id: string): Promise<{ text: string } | { error: string; status: 403 | 404 }> {
+  const a = await accountFor(mailbox);
+  if (!a || !a.enabled) return { error: "Email sync is off for this mailbox", status: 404 };
+  if (a.visibility !== "everything") return { error: "This mailbox shares metadata only; open the email in Gmail", status: 403 };
+  const known = await get("SELECT 1 AS ok FROM email_message_contacts WHERE mailbox = ? AND message_id = ? LIMIT 1", [mailbox, id]);
+  if (!known) return { error: "Email not found", status: 404 };
+  const data = (await gmail(env).run("GOOGLESUPER_FETCH_MESSAGE_BY_MESSAGE_ID", { message_id: id, format: "full", user_id: "me" })) as {
+    messageText?: string;
+    preview?: { body?: string };
+  } | null;
+  return { text: (data?.messageText || data?.preview?.body || "").trim() };
+}
+
+export async function counts(mailbox: string): Promise<{ emails: number; contacts: number }> {
+  const e = await get<{ n: number }>("SELECT COUNT(*) AS n FROM email_messages WHERE mailbox = ?", [mailbox]);
+  const c = await get<{ n: number }>("SELECT COUNT(DISTINCT contact_id) AS n FROM email_message_contacts WHERE mailbox = ?", [mailbox]);
+  return { emails: e?.n ?? 0, contacts: c?.n ?? 0 };
+}

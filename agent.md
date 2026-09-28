@@ -60,6 +60,26 @@ wired first: `GET /api/integrations/status` → `{ email, meeting, slack }`.
 If a capability isn't connected, the endpoint returns an error — tell the user to
 connect it in the Clawnify dashboard; don't try to work around it.
 
+## Gmail sync
+
+The org's connected Gmail can be synced (Settings → **Email**): for each email with
+a contact, the CRM keeps who wrote to whom and when. Email bodies stay in Gmail.
+
+- `GET /api/contacts/{id}/emails`: the contact's synced emails, newest first,
+  `{ emails, total, sync_on }`. Each email has `direction` (`sent`/`received`),
+  `from_email`, `to_emails`, `sent_at`, and `subject` only when the mailbox's
+  visibility shares subjects (otherwise `null`).
+- `GET /api/emails/{mailbox}/{id}`: one email's text, read live from Gmail. Only
+  when the mailbox shares everything (`can_open: true` on the email); 403 otherwise.
+- Contacts carry `last_contacted_at` (read-only), so "who haven't we emailed in a
+  month" is a filter on the contacts list: `last_contacted_at` `before` a date.
+- `GET /api/email-sync` shows the settings and progress; `POST /api/email-sync/run`
+  syncs now.
+
+You can read synced emails and run a sync, but not change what a mailbox shares
+or turn sync on or off: that is a person's decision, made in Settings → Email.
+Don't work around a hidden subject by opening the email in the browser.
+
 ## Import contacts (CSV / XLSX)
 
 Users import via the dashboard UI (Contacts → **Import**): upload a CSV/XLSX, map

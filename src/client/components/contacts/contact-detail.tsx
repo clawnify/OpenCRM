@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { InlineField } from "@/components/ui/inline-field";
 import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, AskAi, useRecordChat } from "@/components/record-page";
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
+import { ContactEmails } from "@/components/contacts/contact-emails";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -338,7 +339,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
               )}
             </section>
 
-            <FutureSection label="Emails" count={emailCount} onAdd={() => openFormKind("email")} />
+            <ContactEmails contactId={contact.id} contactName={fullName} canCompose={connections.email} onCompose={() => openFormKind("email")} navigate={navigate} />
             <FutureSection label="Notes" count={noteCount} onAdd={() => openFormKind("note")} />
             <FutureSection label="Tasks" count={0} />
           </div>

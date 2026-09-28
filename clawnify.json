@@ -17,6 +17,12 @@
     "optional": ["SLACK_CHANNEL"]
   },
 
+  "api": {
+    "public_routes": [
+      { "path": "/api/email-sync/run", "methods": ["POST"] }
+    ]
+  },
+
   "deploy": {
     "title": "Deploy your CRM",
     "subtitle": "Like HubSpot — customized for your sales process in minutes",
