@@ -35,6 +35,8 @@ export function CompaniesPage({ navigate, openId, viewParam, filtersParam }: { n
       { key: "industry", label: "Industry", type: "text", column: "industry" },
       { key: "contacts", label: "Contacts", type: "relation", entity: "contact", column: "contacts" },
       { key: "count:contacts", label: "Contacts count", type: "number", column: "contacts" },
+      { key: "deals", label: "Deals", type: "relation", entity: "deal" },
+      { key: "count:deals", label: "Deals count", type: "number" },
       { key: "phone", label: "Phone", type: "text" },
       { key: "email", label: "Email", type: "text" },
       { key: "created_at", label: "Created", type: "date" },
