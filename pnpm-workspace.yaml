@@ -9,3 +9,4 @@ minimumReleaseAgeExclude:
   # builds pick up fresh versions promptly.
   - '@clawnify/routes'
   - '@clawnify/app'
+  - '@clawnify/connections'
