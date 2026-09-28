@@ -8,6 +8,8 @@ timeline and Clawnify integrations. Preact + Hono + D1.
 - `GET/POST/PUT/DELETE /api/contacts` · `/api/companies` · `/api/deals`
 - Contacts belong to companies; deals belong to contacts.
 - `GET /api/stats` — counts + total pipeline value (excludes lost deals).
+- `GET /api/widgets` — the tiles the Clawnify home page shows: deals created
+  this month, open pipeline value and by stage, deals per week, latest deals.
 
 ## Pipeline stages (data, not code)
 
