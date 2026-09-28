@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Sparkles } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -42,8 +42,8 @@ function AiHeaderControl({ ai, fieldKey, label, emptyIds, chips }: {
       <PopoverTrigger asChild>
         {on ? (
           <button type="button" aria-label={`AI settings for ${label}`}
-            className="inline-flex h-5 shrink-0 items-center gap-1 rounded-sm bg-secondary px-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-            <Sparkles className="size-3" aria-hidden /> AI
+            className="inline-flex h-5 shrink-0 items-center rounded-sm bg-secondary px-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+            AI
           </button>
         ) : (
           <button type="button" aria-label={`Fill ${label} with AI`} title="Fill with AI"
@@ -73,9 +73,19 @@ function AiColumnPanel({ ai, fieldKey, label, emptyIds, chips, onDone }: {
   const [note, setNote] = useState<string | null>(null);
   const pending = ai.pendingIn(fieldKey);
   const next = Math.min(emptyIds.length, ai.limit);
-  const insert = (key: string) => setPrompt((p) => `${p}${p && !/\s$/.test(p) ? " " : ""}{{${key}}}`);
-  // Quoting the domain is how a column asks for that website to be read (no switch).
-  const siteChip = chips.find((c) => c.key === "domain" || c.key === "company_domain");
+  const box = useRef<HTMLTextAreaElement>(null);
+  // A chip goes in at the caret and leaves the caret after it, so typing carries on.
+  const insert = (key: string) => {
+    const el = box.current;
+    const start = el?.selectionStart ?? prompt.length;
+    const before = prompt.slice(0, start);
+    const token = `${before && !/\s$/.test(before) ? " " : ""}{{${key}}}`;
+    setPrompt(before + token + prompt.slice(el?.selectionEnd ?? start));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + token.length, start + token.length);
+    });
+  };
 
   // Turning the column on is itself the first fill: the spark means "fill this with AI".
   const fill = async () => {
@@ -115,20 +125,20 @@ function AiColumnPanel({ ai, fieldKey, label, emptyIds, chips, onDone }: {
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={`ai-prompt-${fieldKey}`}>Instructions <span className="font-normal text-muted-foreground">(optional)</span></Label>
-        <Textarea id={`ai-prompt-${fieldKey}`} rows={3} value={prompt} disabled={!ai.canConfigure}
+        <Textarea ref={box} id={`ai-prompt-${fieldKey}`} rows={3} value={prompt} disabled={!ai.canConfigure}
           onChange={(e) => setPrompt(e.target.value)} placeholder={`e.g. The ${label.toLowerCase()} of {{${chips[0]?.key ?? "name"}}}, in a few words`} />
         {ai.canConfigure && chips.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {chips.map((c) => (
-              <button key={c.key} type="button" onClick={() => insert(c.key)} title={`Insert ${c.label}`}
-                className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground">
-                {c.label}
-              </button>
-            ))}
-          </div>
-        )}
-        {siteChip && (
-          <p className="text-xs text-muted-foreground">Insert {siteChip.label} and the AI also reads that website.</p>
+          <>
+            <div className="flex flex-wrap gap-1">
+              {chips.map((c) => (
+                <button key={c.key} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => insert(c.key)} title={`Insert ${c.label}`}
+                  className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground">
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">If you quote no field, the AI uses them all.</p>
+          </>
         )}
       </div>
 
