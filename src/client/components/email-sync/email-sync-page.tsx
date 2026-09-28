@@ -140,7 +140,7 @@ export function EmailSyncPage() {
 
           {!status.connected ? (
             <section className="rounded-md p-4 shadow-edge">
-              <p className="text-sm">Gmail isn't connected. Connect Google Workspace in Clawnify (Settings → Integrations), then come back here.</p>
+              <p className="text-sm">Gmail isn't connected. Connect Gmail in Clawnify (Settings → Integrations), then come back here.</p>
             </section>
           ) : (
             <section aria-label="Mailbox" className="flex flex-col gap-3 rounded-md p-4 shadow-edge">

@@ -2,7 +2,7 @@ import { createApp, createRoute, widgets, z, caller, user } from "@clawnify/app"
 import { verifyDelivery } from "@clawnify/queue";
 import { query, get, run } from "./db.js";
 import type { CredentialBinding } from "@clawnify/connections";
-import { sendEmail, createMeeting, notifySlack, connectionStatus } from "./integrations.js";
+import { sendEmail, createMeeting, notifySlack, connectionStatus, mailConnection } from "./integrations.js";
 import {
   listDefs,
   createDef,
@@ -2031,23 +2031,25 @@ function safeArray(v: string | null): unknown[] {
 // settings page does; the contacts page's banner reads stored state only).
 app.get("/api/email-sync", async (c) => {
   try {
-    const { email } = await connectionStatus(c.env);
+    const mail = await mailConnection(c.env);
     let connected: string | null = null;
-    if (email && c.req.query("check") === "1") {
+    if (mail && c.req.query("check") === "1") {
       try {
-        connected = await connectedMailbox(c.env);
+        connected = await connectedMailbox(mail);
       } catch {
         connected = null;
       }
     }
-    const account = (connected ? await accountFor(connected) : null) ?? (await currentAccount());
+    // The mailbox being synced when there is one, else the connected one's last settings.
+    const current = await currentAccount();
+    const account = current?.enabled ? current : ((connected ? await accountFor(connected) : null) ?? current);
     const mailbox = connected ?? account?.mailbox ?? null;
     if (account?.enabled) await ensureScheduled(c.env, new URL(c.req.url).origin, account);
     return c.json({
-      connected: email,
+      connected: !!mail,
       mailbox,
       // The Google connection now signs in as a different mailbox than the one synced.
-      mailbox_changed: !!(account && connected && connected !== account.mailbox),
+      mailbox_changed: !!(account?.enabled && connected && connected !== account.mailbox),
       account: account ? accountView(account) : null,
       counts: account ? await counts(account.mailbox) : { emails: 0, contacts: 0 },
       can_configure: mayConfigure(c),
@@ -2066,8 +2068,9 @@ app.put("/api/email-sync", async (c) => {
     const body = await c.req.json<Record<string, unknown>>();
     const who = user(c)?.email ?? user(c)?.id ?? null;
 
-    if (!(await connectionStatus(c.env)).email) return c.json({ error: "Connect Gmail (Google Workspace) in Clawnify first." }, 409);
-    const mailbox = await connectedMailbox(c.env);
+    const mail = await mailConnection(c.env);
+    if (!mail) return c.json({ error: "Connect Gmail in Clawnify first." }, 409);
+    const mailbox = await connectedMailbox(mail);
     // One mailbox syncs at a time. If the Google connection now signs in as
     // another account, what was synced from the old one goes, as when turning off.
     for (const old of await query<EmailAccount>("SELECT * FROM email_accounts WHERE mailbox != ? AND enabled = 1", [mailbox])) {
@@ -2155,7 +2158,9 @@ class SettingsError extends Error {}
 app.get("/api/email-sync/labels", async (c) => {
   try {
     if (!mayConfigure(c)) return c.json({ error: "Only a signed-in person can change email sync settings." }, 403);
-    return c.json({ labels: await listLabels(c.env) }, 200);
+    const mail = await mailConnection(c.env);
+    if (!mail) return c.json({ error: "Connect Gmail in Clawnify first." }, 409);
+    return c.json({ labels: await listLabels(mail) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }

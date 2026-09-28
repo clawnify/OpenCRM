@@ -3,21 +3,24 @@
 // through connect(service, env).run(ACTION, args): the platform injects the
 // CREDENTIALS binding + CLAWNIFY_ORG_ID at build time, resolves the org's
 // connection, and executes the managed action. Off-platform (local `pnpm dev`)
-// there's no binding, so isConnected() is false and the UI disables the buttons
-// instead of failing.
+// there's no binding, so nothing reads as connected and the UI disables the
+// buttons instead of failing.
 //
 // Action slugs + argument shapes verified against docs.composio.dev/toolkits/*.
 // Keeping the (service, action) pairs here means a Composio rename is a one-line
 // edit, not a hunt across the codebase.
 
-import { connect, isConnected, type ConnectionsEnv } from "@clawnify/connections";
+import { connect, describe, type ConnectionsEnv } from "@clawnify/connections";
 
 // Canonical service ids (never invent these — they come from the Clawnify
-// connections catalog). googlesuper = Google Workspace (Gmail), googlecalendar =
-// Google Calendar, slack = Slack. All Composio-managed.
+// connections catalog). Mail goes through Gmail and meetings through Google
+// Calendar; Google Workspace (googlesuper) covers both, and stands in for
+// whichever of the two the org hasn't connected. slack = Slack. All
+// Composio-managed.
 export const SERVICES = {
-  email: "googlesuper",
+  email: "gmail",
   meeting: "googlecalendar",
+  google: "googlesuper",
   slack: "slack",
 } as const;
 
@@ -27,22 +30,60 @@ export interface ConnectionStatus {
   slack: boolean;
 }
 
-/** Which integrations the org has connected right now (drives UI enable/disable). */
-export async function connectionStatus(env: ConnectionsEnv): Promise<ConnectionStatus> {
-  const [email, meeting, slack] = await Promise.all([
-    isConnected(SERVICES.email, env).catch(() => false),
-    isConnected(SERVICES.meeting, env).catch(() => false),
-    isConnected(SERVICES.slack, env).catch(() => false),
-  ]);
-  return { email, meeting, slack };
+/**
+ * A connected Google service. Composio names every action <TOOLKIT>_<ACTION>,
+ * and Google Workspace carries Gmail's and Calendar's actions under the same
+ * names with the same arguments (GMAIL_FETCH_EMAILS = GOOGLESUPER_FETCH_EMAILS),
+ * so callers name the action without its toolkit: mail.run("FETCH_EMAILS", …).
+ */
+export interface GoogleConnection {
+  service: string;
+  run(action: string, args: Record<string, unknown>): Promise<unknown>;
 }
 
-/** Send an email via the org's connected Gmail (Composio GOOGLESUPER_SEND_EMAIL). */
+/** The services the org has connected, in one call to the broker. */
+async function connectedServices(env: ConnectionsEnv): Promise<Set<string>> {
+  const all = await describe(env, undefined, Object.values(SERVICES).map((service) => ({ service, as: "integration" as const })));
+  return new Set(all.filter((s) => s.connected).map((s) => s.id));
+}
+
+/** The service that does `own`'s job: itself when connected, else Google Workspace. */
+function serviceFor(connected: Set<string>, own: string): string | null {
+  if (connected.has(own)) return own;
+  return connected.has(SERVICES.google) ? SERVICES.google : null;
+}
+
+function google(env: ConnectionsEnv, connected: Set<string>, own: string): GoogleConnection | null {
+  const service = serviceFor(connected, own);
+  if (!service) return null;
+  const client = connect(service, env);
+  const toolkit = service.toUpperCase();
+  return { service, run: (action, args) => client.run(`${toolkit}_${action}`, args) };
+}
+
+/** Which integrations the org has connected right now (drives UI enable/disable). */
+export async function connectionStatus(env: ConnectionsEnv): Promise<ConnectionStatus> {
+  const connected = await connectedServices(env);
+  return {
+    email: !!serviceFor(connected, SERVICES.email),
+    meeting: !!serviceFor(connected, SERVICES.meeting),
+    slack: connected.has(SERVICES.slack),
+  };
+}
+
+/** The org's mail: Gmail, or Google Workspace when Gmail isn't connected. */
+export async function mailConnection(env: ConnectionsEnv): Promise<GoogleConnection | null> {
+  return google(env, await connectedServices(env), SERVICES.email);
+}
+
+/** Send an email from the org's mailbox (Composio GMAIL_SEND_EMAIL). */
 export async function sendEmail(
   env: ConnectionsEnv,
   args: { to: string; subject: string; body: string; isHtml?: boolean },
 ): Promise<unknown> {
-  return connect(SERVICES.email, env).run("GOOGLESUPER_SEND_EMAIL", {
+  const mail = await mailConnection(env);
+  if (!mail) throw new Error("Connect Gmail in Clawnify first.");
+  return mail.run("SEND_EMAIL", {
     recipient_email: args.to,
     subject: args.subject,
     body: args.body,
@@ -50,7 +91,8 @@ export async function sendEmail(
   });
 }
 
-/** Create a Google Calendar event (Composio GOOGLECALENDAR_CREATE_EVENT). */
+/** Create a Google Calendar event (Composio GOOGLECALENDAR_CREATE_EVENT), through
+ *  Google Workspace when Calendar isn't connected. */
 export async function createMeeting(
   env: ConnectionsEnv,
   args: {
@@ -63,7 +105,9 @@ export async function createMeeting(
     description?: string;
   },
 ): Promise<unknown> {
-  return connect(SERVICES.meeting, env).run("GOOGLECALENDAR_CREATE_EVENT", {
+  const calendar = google(env, await connectedServices(env), SERVICES.meeting);
+  if (!calendar) throw new Error("Connect Google Calendar in Clawnify first.");
+  return calendar.run("CREATE_EVENT", {
     summary: args.summary,
     start_datetime: args.startDatetime,
     timezone: args.timezone,
