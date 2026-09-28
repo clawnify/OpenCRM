@@ -96,7 +96,10 @@ A column can be filled by AI from the rest of each record: on Companies,
 Industry and Notes; on Contacts, Title and Status; and the org's own attributes
 except URLs, emails, phones and relations. A person turns it on from the
 column header's spark and may give instructions that quote fields as
-`{{field}}` (e.g. `{{name}}`, `{{domain}}`).
+`{{field}}` (e.g. `{{name}}`, `{{domain}}`). Instructions that quote the domain
+(`{{domain}}` on companies, `{{company_domain}}` on contacts) also give the AI
+that company's homepage, read through Clawnify's page reader and kept 30 days
+per company.
 
 - `GET /api/ai-columns?entity_type=company|contact`: the fields the AI can
   fill, the columns it fills (with their `prompt`), and cells being filled or

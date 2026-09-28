@@ -25,6 +25,12 @@ const STALE_MS = 3 * 60_000;
 const RUN_BUDGET_MS = 25_000;
 /** Fast and inexpensive, and served in every data region the platform routes to. */
 const MODEL = "google/gemini-3.1-flash-lite";
+/** How much of a company's homepage the model reads: enough for what they do, cheap in tokens. */
+const PAGE_CHARS = 12_000;
+/** A page read is kept this long, so one read serves every fill for that company. */
+const PAGE_TTL_DAYS = 30;
+/** A page that couldn't be read is tried again after this long. */
+const PAGE_RETRY_DAYS = 1;
 
 export const AI_ENTITIES: EntityType[] = ["company", "contact"];
 
@@ -194,6 +200,7 @@ export async function queueCell(entity: EntityType, recordId: string, key: strin
 export interface AiEnv {
   CLAWNIFY_TOKEN?: string;
   CLAWNIFY_API_URL?: string;
+  CLAWNIFY_SERVICES_URL?: string;
 }
 
 class ModelError extends Error {
@@ -291,7 +298,74 @@ export function coerceAnswer(spec: FieldSpec, raw: string): string | number | nu
   }
 }
 
-/** Fill one cell: read the record and its company, ask, check the answer, write it. */
+/**
+ * Instructions that mention the company's domain ({{domain}} on a company,
+ * {{company_domain}} on a contact) also get that site's homepage as context:
+ * quoting the domain is how a column asks for it, so there is no switch.
+ */
+export function mentionsDomain(entity: EntityType, prompt: string): boolean {
+  const key = entity === "company" ? "domain" : "company_domain";
+  return new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`).test(prompt);
+}
+
+/** A company's site as `https://host`, from whatever was typed in Domain; null when there is none. */
+export function homepageUrl(domain: unknown): string | null {
+  if (typeof domain !== "string") return null;
+  const host = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/[/?#].*$/, "").replace(/^www\./, "");
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) ? `https://${host}` : null;
+}
+
+interface CompanyPage {
+  company_id: string;
+  url: string;
+  markdown: string | null;
+  error: string | null;
+  fetched_at: string;
+}
+
+/**
+ * The company's homepage as markdown, through Clawnify's page reader
+ * (services.clawnify.com/markdown/render, on the workspace's quota). A read is
+ * kept PAGE_TTL_DAYS and a failed one PAGE_RETRY_DAYS, so a column of fills
+ * reads each company's site once.
+ */
+async function companyPage(env: AiEnv, company: { id: unknown; domain: unknown }): Promise<{ url: string; markdown: string | null; error: string | null } | null> {
+  const url = homepageUrl(company.domain);
+  const id = typeof company.id === "string" ? company.id : null;
+  if (!url || !id) return null;
+  const cached = await get<CompanyPage>(
+    `SELECT * FROM company_pages WHERE company_id = ? AND url = ?
+       AND fetched_at > datetime('now', CASE WHEN markdown IS NULL THEN ? ELSE ? END)`,
+    [id, url, `-${PAGE_RETRY_DAYS} days`, `-${PAGE_TTL_DAYS} days`],
+  );
+  if (cached) return { url, markdown: cached.markdown, error: cached.error };
+
+  let markdown: string | null = null;
+  let error: string | null = null;
+  try {
+    if (!env.CLAWNIFY_TOKEN) throw new Error("no Clawnify token");
+    const base = (env.CLAWNIFY_SERVICES_URL || "https://services.clawnify.com").replace(/\/+$/, "");
+    const res = await fetch(`${base}/markdown/render`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.CLAWNIFY_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ url, max_chars: PAGE_CHARS }),
+      signal: AbortSignal.timeout(RUN_BUDGET_MS),
+    });
+    const body = await res.json().catch(() => null) as { markdown?: string; detail?: string; error?: string } | null;
+    if (res.ok && typeof body?.markdown === "string" && body.markdown.trim()) markdown = body.markdown;
+    else error = body?.detail || body?.error || `the page reader answered ${res.status}`;
+  } catch (err) {
+    error = (err as Error).message;
+  }
+  await run(
+    `INSERT INTO company_pages (company_id, url, markdown, error, fetched_at) VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT (company_id) DO UPDATE SET url = excluded.url, markdown = excluded.markdown, error = excluded.error, fetched_at = excluded.fetched_at`,
+    [id, url, markdown, error ? error.slice(0, 300) : null],
+  );
+  return { url, markdown, error };
+}
+
+/** Fill one cell: read the record, its company and the company's site, ask, check the answer, write it. */
 async function fillCell(env: AiEnv, cell: Pick<AiCell, "entity_type" | "record_id" | "field_key" | "overwrite">): Promise<void> {
   const { entity_type: entity, record_id: id, field_key: key } = cell;
   const table = ENTITY_TABLES[entity];
@@ -303,23 +377,32 @@ async function fillCell(env: AiEnv, cell: Pick<AiCell, "entity_type" | "record_i
     return;
   }
   const company = entity === "contact" && record.company_id
-    ? await get<Record<string, unknown>>("SELECT name, domain, industry FROM companies WHERE id = ?", [record.company_id])
+    ? await get<Record<string, unknown>>("SELECT id, name, domain, industry FROM companies WHERE id = ?", [record.company_id])
     : null;
+  // The site of the company the record is, or belongs to, when the instructions mention its domain.
+  const siteOf = entity === "company" ? record : company;
+  const page = siteOf && mentionsDomain(entity, column.prompt) ? await companyPage(env, { id: siteOf.id, domain: siteOf.domain }) : null;
+  // A contact's instructions can quote its company too.
+  const vars = entity === "contact" ? { ...record, company_name: company?.name, company_domain: company?.domain } : record;
 
   const system = [
     "You fill in one field of a record in a CRM.",
     `The field is "${spec.label}". ${ruleFor(spec)}`,
-    "Use only what the record below says and what is common knowledge about well-known companies. If that is not enough to answer, answer null rather than guess. Never make up contact details.",
+    "Use only what the record below says, the company's website when it is given, and what is common knowledge about well-known companies. If that is not enough to answer, answer null rather than guess. Never make up contact details.",
     'Reply with JSON only: {"value": <your answer, or null>}.',
   ].join("\n");
   const user = [
-    column.prompt.trim() ? `Instructions for this field: ${interpolate(column.prompt, record)}` : "",
+    column.prompt.trim() ? `Instructions for this field: ${interpolate(column.prompt, vars)}` : "",
     `The ${entity}:\n${JSON.stringify(await describeRecord(entity, record), null, 2)}`,
-    company ? `Their company:\n${JSON.stringify(Object.fromEntries(Object.entries(company).filter(([, v]) => !isEmpty(v))), null, 2)}` : "",
+    company ? `Their company:\n${JSON.stringify(Object.fromEntries(Object.entries(company).filter(([k, v]) => k !== "id" && !isEmpty(v))), null, 2)}` : "",
+    page?.markdown ? `The company's website (${page.url}), as markdown:\n${page.markdown}` : "",
   ].filter(Boolean).join("\n\n");
 
   const value = coerceAnswer(spec, await complete(env, system, user));
-  if (value === null) throw new Error("Not enough in the record to answer");
+  if (value === null) {
+    const unread = page && !page.markdown ? ` (couldn't read ${new URL(page.url).host})` : "";
+    throw new Error(`Not enough in the record to answer${unread}`);
+  }
   const onlyIfEmpty = cell.overwrite ? "" : ` AND ("${key}" IS NULL OR TRIM("${key}") = '')`;
   await run(`UPDATE "${table}" SET "${key}" = ?, updated_at = datetime('now') WHERE id = ?${onlyIfEmpty}`, [value, id]);
 }

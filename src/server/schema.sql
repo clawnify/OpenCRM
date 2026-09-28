@@ -243,3 +243,14 @@ CREATE TABLE IF NOT EXISTS ai_cells (
   PRIMARY KEY (entity_type, record_id, field_key)
 );
 CREATE INDEX IF NOT EXISTS idx_ai_cells_status ON ai_cells(status, updated_at);
+
+-- A company's homepage as markdown, read when an AI column's instructions mention
+-- its domain, and kept a while so one read serves every fill for that company.
+-- `error` is set when it couldn't be read.
+CREATE TABLE IF NOT EXISTS company_pages (
+  company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  markdown TEXT,
+  error TEXT,
+  fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

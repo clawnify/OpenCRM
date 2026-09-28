@@ -74,6 +74,8 @@ function AiColumnPanel({ ai, fieldKey, label, emptyIds, chips, onDone }: {
   const pending = ai.pendingIn(fieldKey);
   const next = Math.min(emptyIds.length, ai.limit);
   const insert = (key: string) => setPrompt((p) => `${p}${p && !/\s$/.test(p) ? " " : ""}{{${key}}}`);
+  // Quoting the domain is how a column asks for that website to be read (no switch).
+  const siteChip = chips.find((c) => c.key === "domain" || c.key === "company_domain");
 
   // Turning the column on is itself the first fill: the spark means "fill this with AI".
   const fill = async () => {
@@ -124,6 +126,9 @@ function AiColumnPanel({ ai, fieldKey, label, emptyIds, chips, onDone }: {
               </button>
             ))}
           </div>
+        )}
+        {siteChip && (
+          <p className="text-xs text-muted-foreground">Insert {siteChip.label} and the AI also reads that website.</p>
         )}
       </div>
 

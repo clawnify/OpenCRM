@@ -48,6 +48,7 @@ type Env = {
     CLAWNIFY_TOKEN?: string;
     CLAWNIFY_API_URL?: string;
     CLAWNIFY_QUEUE_URL?: string;
+    CLAWNIFY_SERVICES_URL?: string;
   };
 };
 
