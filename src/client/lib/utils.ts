@@ -93,6 +93,13 @@ export function formatPeriod(period: string): string {
   return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
+/** Whole days since a timestamp: SQLite's "YYYY-MM-DD HH:MM:SS" (UTC) or ISO. */
+export function daysSince(timestamp: string, now = Date.now()): number {
+  const iso = /[zZ]$|[+-]\d\d:?\d\d$/.test(timestamp) ? timestamp : `${timestamp.replace(" ", "T")}Z`;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? 0 : Math.max(0, Math.floor((now - t) / 86_400_000));
+}
+
 /** Days between two ISO dates (positive = b after a). */
 export function daysBetween(a: string, b: string): number {
   const da = new Date(`${a}T00:00:00`).getTime();

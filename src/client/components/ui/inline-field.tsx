@@ -59,7 +59,7 @@ export function InlineField({
         onBlur={() => void commit()}
         onKeyDown={onKey}
         className={cn(box, "bg-card text-foreground outline-none", className)}
-        style={{ boxShadow: "inset 0 0 0 1px var(--ring), 0 0 0 3px var(--accent-tint)" }}
+        style={{ boxShadow: "inset 0 0 0 1px var(--ring), 0 0 0 3px var(--ring-halo)" }}
       />
     );
   }

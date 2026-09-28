@@ -117,7 +117,7 @@
   --faint: oklch(0.68 0.007 85);
   --accent: oklch(0.975 0.002 85);              /* shadcn's hover tone */
   --accent-foreground: oklch(0.22 0.002 85);
-  --accent-brand: oklch(0.6 0.204 15.7056);        /* the app's hue: icon, active nav, hero, focus */
+  --accent-brand: oklch(0.6 0.204 15.7056);        /* the app's hue: icon, active nav, hero */
   --accent-tint: oklch(0.955 0.013 15.7056);
   --destructive: oklch(0.44 0.125 25);
   --destructive-foreground: #ffffff;
@@ -130,7 +130,8 @@
   --border: oklch(0.915 0.007 85);
   --rule: oklch(0.958 0 0);             /* #f1f1f1: the record grid's cell rules, a step lighter than border */
   --input: oklch(1 0 0);               /* filled inputs, no outline */
-  --ring: oklch(0.6 0.204 15.7056);
+  --ring: oklch(0.22 0.002 85);                 /* focus is ink, never the app's hue: coral reads as an error */
+  --ring-halo: oklch(0.94 0.006 85);
   --sidebar: oklch(0.975 0.002 85);
   --sidebar-foreground: oklch(0.22 0.002 85);
   --sidebar-accent: oklch(0.955 0.013 15.7056);
@@ -190,7 +191,8 @@
   --border: oklch(0.3 0.003 85);
   --rule: oklch(0.25 0.003 85);
   --input: oklch(0.2 0.002 85);
-  --ring: oklch(0.62 0.198 15.7056);
+  --ring: oklch(0.95 0.002 85);
+  --ring-halo: oklch(0.3 0.003 85);
   --sidebar: oklch(0.25 0.003 85);
   --sidebar-foreground: oklch(0.95 0.002 85);
   --sidebar-accent: oklch(0.27 0.049 15.7056);
