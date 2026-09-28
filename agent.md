@@ -48,10 +48,12 @@ These use the org's Clawnify connections — no keys live in this app. Check wha
 wired first: `GET /api/integrations/status` → `{ email, meeting, slack }`.
 
 - **Email a contact** — `POST /api/integrations/email` `{ contact_id, subject, body }`.
-  Sends via the org's connected Gmail (`googlesuper`) and logs it on the contact.
+  Sends from the org's Gmail connection (`gmail`), or its Google Workspace one
+  (`googlesuper`) when Gmail isn't connected, and logs it on the contact.
 - **Schedule a meeting** — `POST /api/integrations/meeting`
   `{ contact_id, summary, start_datetime, timezone, duration_minutes }`.
-  Creates a Google Calendar event (`googlecalendar`) with the contact and logs it.
+  Creates a Google Calendar event (`googlecalendar`, or `googlesuper` when Calendar
+  isn't connected) with the contact and logs it.
   `start_datetime` is local wall-clock, e.g. `2026-07-16T13:00:00`; `timezone` is
   an IANA zone, e.g. `America/New_York`.
 - **Deal-won Slack alert** — when a deal moves to a stage with `is_won: 1`, if

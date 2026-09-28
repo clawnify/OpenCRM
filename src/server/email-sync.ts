@@ -12,9 +12,9 @@
 // Runs are short (RUN_BUDGET_MS) and chained through the platform queue, so an
 // import of a large mailbox continues after the page that started it closes.
 
-import { connect, type ConnectionsEnv } from "@clawnify/connections";
+import type { ConnectionsEnv } from "@clawnify/connections";
 import { get, query, run } from "./db.js";
-import { SERVICES } from "./integrations.js";
+import { mailConnection, type GoogleConnection } from "./integrations.js";
 import { workEmailDomain, findOrCreateCompanyByDomain, FREEMAIL_DOMAINS } from "./email-domains.js";
 import {
   parseAddresses, isGroupAddress, isBlocked, normaliseBlocklist, creationCandidates, splitName,
@@ -76,16 +76,24 @@ const PEOPLE_BATCH = 20;
 /** Once live, how often new mail is read. */
 export const LIVE_INTERVAL_MS = 15 * 60_000;
 
-// shortcut: the org's default Google connection. Once an org can connect several
-// accounts (platform: multi-account connections), pass { account: mailbox } so
-// each email_accounts row reads its own connection.
-function gmail(env: ConnectionsEnv) {
-  return connect(SERVICES.email, env);
+// shortcut: the org's one mail connection (Gmail, else Google Workspace). Once
+// an org can connect several accounts (platform: multi-account connections),
+// pass { account: mailbox } so each email_accounts row reads its own connection.
+/** The org's mail connection, refused when it now signs in as another mailbox:
+ *  one mailbox's mail is never written under another's settings. */
+async function mailFor(env: ConnectionsEnv, mailbox: string): Promise<GoogleConnection> {
+  const mail = await mailConnection(env);
+  if (!mail) throw new Error("Gmail is not connected. Connect it in Clawnify to keep syncing.");
+  const connected = await connectedMailbox(mail);
+  if (connected !== mailbox) {
+    throw new Error(`The connected Google account is now ${connected}, not ${mailbox}. Open Email settings to switch.`);
+  }
+  return mail;
 }
 
-/** The address of the mailbox the org's Google connection signs in as. */
-export async function connectedMailbox(env: ConnectionsEnv): Promise<string> {
-  const data = (await gmail(env).run("GOOGLESUPER_GET_PROFILE", { user_id: "me" })) as { emailAddress?: string } | null;
+/** The address of the mailbox a Google connection signs in as. */
+export async function connectedMailbox(mail: GoogleConnection): Promise<string> {
+  const data = (await mail.run("GET_PROFILE", { user_id: "me" })) as { emailAddress?: string } | null;
   const address = (data?.emailAddress ?? "").trim().toLowerCase();
   if (!address) throw new Error("The connected Google account did not report its address");
   return address;
@@ -93,8 +101,8 @@ export async function connectedMailbox(env: ConnectionsEnv): Promise<string> {
 
 /** The mailbox's labels, for choosing which ones to import. System labels
  *  (INBOX, SENT, CATEGORY_*…) are left out: "Everything" already covers them. */
-export async function listLabels(env: ConnectionsEnv): Promise<Array<{ id: string; name: string }>> {
-  const data = (await gmail(env).run("GOOGLESUPER_LIST_LABELS", { user_id: "me" })) as {
+export async function listLabels(mail: GoogleConnection): Promise<Array<{ id: string; name: string }>> {
+  const data = (await mail.run("LIST_LABELS", { user_id: "me" })) as {
     labels?: Array<{ id?: string; name?: string; type?: string }>;
   } | null;
   return (data?.labels ?? [])
@@ -115,8 +123,8 @@ interface GmailMessage {
 
 /** One page of a Gmail search, headers only. The preview snippet the API also
  *  returns is dropped here, so no body text reaches this app. */
-async function fetchPage(env: ConnectionsEnv, q: string, page: string | null | undefined, max = PAGE_SIZE) {
-  const data = (await gmail(env).run("GOOGLESUPER_FETCH_EMAILS", {
+async function fetchPage(mail: GoogleConnection, q: string, page: string | null | undefined, max = PAGE_SIZE) {
+  const data = (await mail.run("FETCH_EMAILS", {
     query: q,
     max_results: max,
     verbose: false,
@@ -315,12 +323,7 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
   let cursor: Cursor = parseCursor(a.import_cursor) ?? { step: firstStep(a), started_at: now.toISOString() };
   let phase = a.phase === "idle" ? "importing" : a.phase;
   try {
-    // Never write one mailbox's mail under another's settings: if the org's
-    // Google connection now signs in as someone else, stop and say so.
-    const connected = await connectedMailbox(env);
-    if (connected !== a.mailbox) {
-      throw new Error(`The connected Google account is now ${connected}, not ${a.mailbox}. Open Email settings to switch.`);
-    }
+    const mail = await mailFor(env, a.mailbox);
 
     const scope = scopeOf(a, now);
     const index = await contactIndex();
@@ -329,7 +332,7 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
     while (Date.now() - started < RUN_BUDGET_MS) {
       if (cursor.step === "sent" || cursor.step === "received") {
         const q = cursor.step === "sent" ? sentQuery(scope) : receivedQuery(scope);
-        const { messages, next } = await fetchPage(env, q, cursor.page);
+        const { messages, next } = await fetchPage(mail, q, cursor.page);
         created += await createFrom(a, messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m), index);
         if (next) cursor = { ...cursor, page: next };
         else cursor = { step: cursor.step === "sent" && a.auto_create === "sent_and_received" ? "received" : "people", started_at: cursor.started_at };
@@ -353,7 +356,7 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
           cursor = { ...cursor, batch, page: null };
         }
         const emails = cursor.batch!.map((b) => b.email).filter((e) => !isBlocked(e, rulesOf(a).blocklist));
-        const { messages, next } = emails.length ? await fetchPage(env, peopleQuery(emails, scope), cursor.page) : { messages: [], next: null };
+        const { messages, next } = emails.length ? await fetchPage(mail, peopleQuery(emails, scope), cursor.page) : { messages: [], next: null };
         const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
         for (const cid of await storeAndLink(a, parsed, index)) touched.add(cid);
         stored += parsed.length;
@@ -374,7 +377,7 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
 
       // live: everything since the last sync, all pages, then move the mark.
       const since = new Date(a.synced_until ?? now.toISOString());
-      const { messages, next } = await fetchPage(env, sinceQuery(since, scope), cursor.page);
+      const { messages, next } = await fetchPage(mail, sinceQuery(since, scope), cursor.page);
       const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
       created += await createFrom(a, parsed, index);
       for (const cid of await storeAndLink(a, parsed, index)) touched.add(cid);
@@ -559,7 +562,8 @@ export async function importContactIfNeeded(env: ConnectionsEnv, contactId: stri
   if (done?.email === contact.email) return;
   if (isBlocked(contact.email, rulesOf(a).blocklist)) return;
 
-  const { messages } = await fetchPage(env, peopleQuery([contact.email], scopeOf(a, now)), null);
+  const mail = await mailFor(env, a.mailbox);
+  const { messages } = await fetchPage(mail, peopleQuery([contact.email], scopeOf(a, now)), null);
   const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
   const index = new Map([[contact.email, contactId]]);
   await storeAndLink(a, parsed, index);
@@ -572,13 +576,15 @@ export async function importContactIfNeeded(env: ConnectionsEnv, contactId: stri
 }
 
 /** One email's text, read live from Gmail and never stored. Only at "everything". */
-export async function openEmail(env: ConnectionsEnv, mailbox: string, id: string): Promise<{ text: string } | { error: string; status: 403 | 404 }> {
+export async function openEmail(env: ConnectionsEnv, mailbox: string, id: string): Promise<{ text: string } | { error: string; status: 403 | 404 | 409 }> {
   const a = await accountFor(mailbox);
   if (!a || !a.enabled) return { error: "Email sync is off for this mailbox", status: 404 };
   if (a.visibility !== "everything") return { error: "This mailbox shares metadata only; open the email in Gmail", status: 403 };
   const known = await get("SELECT 1 AS ok FROM email_message_contacts WHERE mailbox = ? AND message_id = ? LIMIT 1", [mailbox, id]);
   if (!known) return { error: "Email not found", status: 404 };
-  const data = (await gmail(env).run("GOOGLESUPER_FETCH_MESSAGE_BY_MESSAGE_ID", { message_id: id, format: "full", user_id: "me" })) as {
+  const mail = await mailConnection(env);
+  if (!mail) return { error: "Gmail is not connected", status: 409 };
+  const data = (await mail.run("FETCH_MESSAGE_BY_MESSAGE_ID", { message_id: id, format: "full", user_id: "me" })) as {
     messageText?: string;
     preview?: { body?: string };
   } | null;

@@ -111,7 +111,7 @@ export interface EmailAccountSettings {
 }
 
 export interface EmailSyncStatus {
-  /** Gmail (Google Workspace) is connected in Clawnify. */
+  /** Gmail, or Google Workspace, is connected in Clawnify. */
   connected: boolean;
   mailbox: string | null;
   /** The connection now signs in as another account than the one synced. */
