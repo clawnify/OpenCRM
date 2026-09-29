@@ -62,6 +62,8 @@ export function RelationAttrs({ defs, row, onSave }: {
       {defs.filter((d) => d.relation_type === "many_to_one" && d.target_entity).map((def) => (
         <Attr key={def.id} icon={Link2} label={def.label}>
           <RelationInput
+            link
+            label={def.label.toLowerCase()}
             entity={def.target_entity!}
             value={(row as unknown as Record<string, unknown>)[def.key] as string | null ?? null}
             known={row.relations?.[def.key] as RelationRecord | null | undefined}
