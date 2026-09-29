@@ -2173,9 +2173,30 @@ app.get("/api/email-sync/labels", async (c) => {
 });
 
 // One bounded sync run, then book the next: at once while the first import has
-// work left, otherwise in LIVE_INTERVAL_MS. Called by the platform queue (a
-// signed delivery on a declared public route) or by a person or agent ("Sync
-// now"). Anonymous callers cannot make the app read a mailbox.
+// work left, otherwise in LIVE_INTERVAL_MS.
+async function syncAndBook(env: Env["Bindings"], origin: string, raw: string): Promise<Record<string, unknown>> {
+  let mailbox: string | undefined;
+  try {
+    mailbox = (JSON.parse(raw || "{}") as { mailbox?: string }).mailbox;
+  } catch {
+    mailbox = undefined;
+  }
+  mailbox = mailbox ?? (await currentAccount())?.mailbox;
+  if (!mailbox) return { status: "off" };
+
+  const result = await runSync(env, mailbox);
+  if (result.status === "ran" || result.status === "error") {
+    const delay = result.status === "error" ? 10 * 60_000 : result.more ? 0 : LIVE_INTERVAL_MS;
+    await scheduleRun(env, origin, mailbox, new Date(Date.now() + delay));
+  }
+  const account = await accountFor(mailbox);
+  return { ...result, account: account ? accountView(account) : null, counts: await counts(mailbox) };
+}
+
+// The platform queue's target: a signed delivery on a declared public route.
+// A browser's request to a public route reaches the app with no identity (the
+// platform drops it, so no other site can post here as you), which is why
+// "Sync now" has its own route. Callers through the platform's API proxy keep theirs.
 app.post("/api/email-sync/run", async (c) => {
   const raw = await c.req.text();
   const signed = await verifyDelivery(raw, {
@@ -2188,23 +2209,20 @@ app.post("/api/email-sync/run", async (c) => {
     return c.json({ error: "Sign in to run a sync." }, 403);
   }
   try {
-    let mailbox: string | undefined;
-    try {
-      mailbox = (JSON.parse(raw || "{}") as { mailbox?: string }).mailbox;
-    } catch {
-      mailbox = undefined;
-    }
-    mailbox = mailbox ?? (await currentAccount())?.mailbox;
-    if (!mailbox) return c.json({ status: "off" }, 200);
+    return c.json(await syncAndBook(c.env, new URL(c.req.url).origin, raw), 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
 
-    const result = await runSync(c.env, mailbox);
-    const origin = new URL(c.req.url).origin;
-    if (result.status === "ran" || result.status === "error") {
-      const delay = result.status === "error" ? 10 * 60_000 : result.more ? 0 : LIVE_INTERVAL_MS;
-      await scheduleRun(c.env, origin, mailbox, new Date(Date.now() + delay));
-    }
-    const account = await accountFor(mailbox);
-    return c.json({ ...result, account: account ? accountView(account) : null, counts: await counts(mailbox) }, 200);
+// "Sync now", for a person or an agent. Anonymous callers cannot make the app read a mailbox.
+app.post("/api/email-sync/sync-now", async (c) => {
+  const who = caller(c);
+  if (who !== "user" && who !== "api" && who !== "agent") {
+    return c.json({ error: "Sign in to run a sync." }, 403);
+  }
+  try {
+    return c.json(await syncAndBook(c.env, new URL(c.req.url).origin, await c.req.text()), 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }

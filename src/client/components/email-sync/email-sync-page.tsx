@@ -106,7 +106,7 @@ export function EmailSyncPage() {
   const syncNow = async () => {
     setSaving(true);
     try {
-      const r = await api<{ account: EmailAccountSettings | null; counts: EmailSyncStatus["counts"]; error?: string }>("POST", "/api/email-sync/run", {});
+      const r = await api<{ account: EmailAccountSettings | null; counts: EmailSyncStatus["counts"]; error?: string }>("POST", "/api/email-sync/sync-now", {});
       setStatus((s) => (s ? { ...s, account: r.account ?? s.account, counts: r.counts } : s));
       await recordsChanged();
     } catch (e) {

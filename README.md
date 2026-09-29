@@ -204,7 +204,8 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 | POST | `/api/ai-columns/:entity/:field/fill` | Fill the empty cells among the given rows, 20 at most |
 | POST | `/api/ai-columns/:entity/:field/cells/:id` | Write one cell again with AI |
 | POST | `/api/ai-columns/run` | Fill queued cells. Also the platform queue's target |
-| POST | `/api/email-sync/run` | Run a sync now. Also the platform queue's target, which chains runs until the first import is done |
+| POST | `/api/email-sync/sync-now` | Run a sync now (signed-in people, API callers and agents) |
+| POST | `/api/email-sync/run` | The platform queue's target, which chains runs until the first import is done. A public route, so a browser's request reaches it without identity: people use `sync-now` |
 
 ## Community & Contributions
 
