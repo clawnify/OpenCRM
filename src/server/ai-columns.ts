@@ -12,6 +12,7 @@
 // The model is called through the Clawnify platform with the org's token, so
 // each call is charged to the org's credits and follows its data region.
 
+import { renderMarkdown } from "@clawnify/services";
 import { get, query, run } from "./db.js";
 import { ENTITY_TABLES, listDefs, coerceCustomValue, type CustomFieldDef, type EntityType } from "./custom-fields.js";
 
@@ -344,17 +345,9 @@ async function companyPage(env: AiEnv, company: { id: unknown; domain: unknown }
   let markdown: string | null = null;
   let error: string | null = null;
   try {
-    if (!env.CLAWNIFY_TOKEN) throw new Error("no Clawnify token");
-    const base = (env.CLAWNIFY_SERVICES_URL || "https://services.clawnify.com").replace(/\/+$/, "");
-    const res = await fetch(`${base}/markdown/render`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.CLAWNIFY_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ url, max_chars: PAGE_CHARS }),
-      signal: AbortSignal.timeout(RUN_BUDGET_MS),
-    });
-    const body = await res.json().catch(() => null) as { markdown?: string; detail?: string; error?: string } | null;
-    if (res.ok && typeof body?.markdown === "string" && body.markdown.trim()) markdown = body.markdown;
-    else error = body?.detail || body?.error || `the page reader answered ${res.status}`;
+    const page = await renderMarkdown(env, { url, maxChars: PAGE_CHARS, signal: AbortSignal.timeout(RUN_BUDGET_MS) });
+    if (page.markdown.trim()) markdown = page.markdown;
+    else error = "the page rendered no text";
   } catch (err) {
     error = (err as Error).message;
   }
