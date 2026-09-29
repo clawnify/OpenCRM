@@ -8,6 +8,16 @@ import type { ContactEmail } from "@/types";
 
 const FIRST = 5;
 
+/** When an email went out, as a mail list shows it: the time today, the day and time this week, the date before that. */
+function sentWhen(iso: string, now = new Date()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return formatDate(iso);
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return time;
+  if (now.getTime() - d.getTime() < 7 * 86_400_000) return `${formatDate(iso, { month: "short", day: "numeric" })}, ${time}`;
+  return formatDate(iso);
+}
+
 /**
  * A contact's emails from the synced Gmail (Settings → Email), newest first.
  * What each row shows is the mailbox's visibility: the subject only when it
@@ -94,7 +104,7 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
                     <span className={cn("truncate text-sm", e.subject ? "text-foreground" : "text-muted-foreground")}>{e.subject || (sent ? "Email sent" : "Email received")}</span>
                     <span className="truncate text-xs text-muted-foreground">{sent ? `You → ${other}` : `${other} → you`}</span>
                   </button>
-                  <span className="shrink-0 tabular text-xs text-muted-foreground">{formatDate(e.sent_at)}</span>
+                  <span className="shrink-0 tabular text-xs text-muted-foreground" title={new Date(e.sent_at).toLocaleString()}>{sentWhen(e.sent_at)}</span>
                   <a href={e.gmail_url} target="_blank" rel="noreferrer" aria-label="Open in Gmail" title={`Open in Gmail (${e.mailbox})`} className="shrink-0 text-muted-foreground hover:text-foreground">
                     <ExternalLink className="size-3.5" />
                   </a>

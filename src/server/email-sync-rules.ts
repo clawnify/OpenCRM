@@ -149,7 +149,7 @@ export function splitName(address: Address): { first: string; last: string } {
   return { first: local, last: "" };
 }
 
-/** Gmail's after: takes whole UTC days as YYYY/MM/DD. */
+/** A date as Gmail's after: reads it (YYYY/MM/DD, midnight Pacific): a day is precision enough for the first import's reach. */
 function gmailDate(d: Date): string {
   return `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
 }
@@ -196,9 +196,18 @@ export function peopleQuery(emails: string[], scope: Scope): string {
   return [`{${either.join(" ")}}`, ...scopeTerms(scope)].join(" ");
 }
 
-/** New mail since the last sync, one day of overlap for Gmail's whole-day after:. */
+/** How far back each live read reaches before the last sync: for mail that becomes searchable late. */
+export const LIVE_OVERLAP_MS = 60 * 60_000;
+/** The same when only labels sync: mail enters a label when someone labels it, often hours after it arrived. */
+export const LABEL_OVERLAP_MS = 86_400_000;
+
+/**
+ * New mail since the last sync. after: takes Unix seconds as well as dates
+ * (developers.google.com/workspace/gmail/api/guides/filtering), so a live read
+ * of all mail reaches back an hour, not the whole day a date would.
+ */
 export function sinceQuery(syncedUntil: Date, scope: Scope): string {
-  const since = new Date(syncedUntil.getTime() - 86_400_000);
+  const since = new Date(syncedUntil.getTime() - (scope.labels.length ? LABEL_OVERLAP_MS : LIVE_OVERLAP_MS));
   const floor = scope.since && scope.since > since ? scope.since : since;
-  return scopeTerms({ ...scope, since: floor }).join(" ");
+  return [...scopeTerms({ ...scope, since: null }), `after:${Math.floor(floor.getTime() / 1000)}`].join(" ");
 }

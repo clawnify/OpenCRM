@@ -61,6 +61,8 @@ interface Cursor {
   started_at?: string;
   /** The newest message a live pass has seen; becomes synced_until when the pass ends. */
   max_seen?: string;
+  /** Checking stored sent mail against Gmail: the last row checked (`sent_at|id`), or "done". */
+  check?: string;
 }
 
 function firstStep(a: Pick<EmailAccount, "auto_create">): Cursor["step"] {
@@ -75,6 +77,10 @@ const PAGE_SIZE = 100;
 const PEOPLE_BATCH = 20;
 /** Once live, how often new mail is read. */
 export const LIVE_INTERVAL_MS = 15 * 60_000;
+/** How far back live reads start again when the mark is found in the future. */
+const REWIND_MS = 30 * 86_400_000;
+/** Stored sent rows one run checks against Gmail, at most. */
+const CHECKS_PER_RUN = 20;
 
 // shortcut: the org's one mail connection (Gmail, else Google Workspace). Once
 // an org can connect several accounts (platform: multi-account connections),
@@ -154,10 +160,18 @@ interface Parsed {
   labelIds: string[];
 }
 
-function parse(m: GmailMessage & { labelIds: string[] }, mailbox: string): Parsed | null {
+/** Clock skew allowed before a message's date counts as the future. */
+const FUTURE_SKEW_MS = 5 * 60_000;
+
+function parse(m: GmailMessage & { labelIds: string[] }, mailbox: string, now: Date): Parsed | null {
   if (!m.messageId || !m.threadId || !m.messageTimestamp) return null;
+  // Only what Gmail has sent is sent. A draft (Gmail saves one under a new id as
+  // you type) and a scheduled send (no label until it goes out, dated when it
+  // will) haven't happened, so neither is kept, links a contact or creates one.
+  if (m.labelIds.includes("DRAFT") || Date.parse(m.messageTimestamp) > now.getTime() + FUTURE_SKEW_MS) return null;
   const from = parseAddresses(m.sender)[0] ?? null;
-  const sent = m.labelIds.includes("SENT") || from?.email === mailbox;
+  const sent = m.labelIds.includes("SENT");
+  if (!sent && from?.email === mailbox) return null;
   return {
     id: m.messageId,
     threadId: m.threadId,
@@ -285,6 +299,59 @@ function later(a: string | undefined, b: string): string {
   return !a || b > a ? b : a;
 }
 
+/** Removes stored messages and their links; returns the contacts whose last contact may change. */
+async function forget(mailbox: string, ids: string[]): Promise<string[]> {
+  const affected: string[] = [];
+  for (let i = 0; i < ids.length; i += 90) {
+    const part = ids.slice(i, i + 90);
+    const marks = part.map(() => "?").join(", ");
+    const links = await query<{ contact_id: string }>(`SELECT DISTINCT contact_id FROM email_message_contacts WHERE mailbox = ? AND message_id IN (${marks})`, [mailbox, ...part]);
+    affected.push(...links.map((l) => l.contact_id));
+    await run(`DELETE FROM email_message_contacts WHERE mailbox = ? AND message_id IN (${marks})`, [mailbox, ...part]);
+    await run(`DELETE FROM email_messages WHERE mailbox = ? AND id IN (${marks})`, [mailbox, ...part]);
+  }
+  return affected;
+}
+
+// ── Checking stored sent mail ──────────────────────────────────────
+
+/** Gmail's answer for a message id it no longer has. */
+const gone = (e: unknown) => e instanceof Error && /"code":\s*404|NOT_FOUND|Requested entity was not found/.test(e.message);
+
+/**
+ * Sent rows stored before "sent" meant "labelled SENT" can be drafts or
+ * scheduled mail. Walks them newest first, a few per run, asking Gmail about
+ * each: a row Gmail no longer has, or has not sent, is forgotten. Any other
+ * failure stops the walk until the next run and forgets nothing.
+ */
+async function checkSent(mail: GoogleConnection, mailbox: string, from: string | undefined, deadline: number): Promise<{ check: string; dropped: number; affected: string[]; failed: boolean }> {
+  const [at, id] = (from ?? "9999-12-31T23:59:59Z|").split("|");
+  const rows = await query<{ id: string; sent_at: string }>(
+    `SELECT id, sent_at FROM email_messages
+      WHERE mailbox = ? AND direction = 'sent' AND (sent_at < ? OR (sent_at = ? AND id < ?))
+      ORDER BY sent_at DESC, id DESC LIMIT ?`,
+    [mailbox, at, at, id, CHECKS_PER_RUN],
+  );
+  const drop: string[] = [];
+  let check = `${at}|${id}`;
+  let checked = 0;
+  let failed = false;
+  for (const r of rows) {
+    if (Date.now() > deadline) break;
+    try {
+      const data = (await mail.run("FETCH_MESSAGE_BY_MESSAGE_ID", { message_id: r.id, format: "minimal", user_id: "me" })) as { labelIds?: unknown } | null;
+      if (Array.isArray(data?.labelIds) && !data.labelIds.includes("SENT")) drop.push(r.id);
+    } catch (e) {
+      if (!gone(e)) { failed = true; break; }
+      drop.push(r.id);
+    }
+    check = `${r.sent_at}|${r.id}`;
+    checked++;
+  }
+  if (!failed && checked === rows.length && rows.length < CHECKS_PER_RUN) check = "done";
+  return { check, dropped: drop.length, affected: await forget(mailbox, drop), failed };
+}
+
 // ── Running ────────────────────────────────────────────────────────
 
 /** Takes the mailbox for one run, or null when another run holds it. */
@@ -304,6 +371,8 @@ export interface RunResult {
   step?: Cursor["step"];
   created?: number;
   stored?: number;
+  /** Stored rows removed because Gmail no longer has them or never sent them. */
+  forgotten?: number;
   more?: boolean;
   error?: string;
 }
@@ -320,7 +389,10 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
   const started = Date.now();
   let created = 0;
   let stored = 0;
-  let cursor: Cursor = parseCursor(a.import_cursor) ?? { step: firstStep(a), started_at: now.toISOString() };
+  let forgotten = 0;
+  // A first import keeps only mail Gmail labelled SENT, so it has nothing to check.
+  let cursor: Cursor = parseCursor(a.import_cursor) ?? { step: firstStep(a), started_at: now.toISOString(), check: "done" };
+  let check = cursor.check; // outlives the cursor's rebuilds below
   let phase = a.phase === "idle" ? "importing" : a.phase;
   try {
     const mail = await mailFor(env, a.mailbox);
@@ -329,11 +401,20 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
     const index = await contactIndex();
     const touched = new Set<string>();
 
+    if (phase === "live") {
+      // The mark once followed a scheduled send into the future, and live reads
+      // skipped the mail before it: read the last 30 days again (stores are idempotent).
+      if (a.synced_until && a.synced_until > now.toISOString()) a.synced_until = new Date(now.getTime() - REWIND_MS).toISOString();
+      const future = await query<{ id: string }>("SELECT id FROM email_messages WHERE mailbox = ? AND sent_at > ?", [a.mailbox, new Date(now.getTime() + FUTURE_SKEW_MS).toISOString()]);
+      for (const cid of await forget(a.mailbox, future.map((f) => f.id))) touched.add(cid);
+      forgotten += future.length;
+    }
+
     while (Date.now() - started < RUN_BUDGET_MS) {
       if (cursor.step === "sent" || cursor.step === "received") {
         const q = cursor.step === "sent" ? sentQuery(scope) : receivedQuery(scope);
         const { messages, next } = await fetchPage(mail, q, cursor.page);
-        created += await createFrom(a, messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m), index);
+        created += await createFrom(a, messages.map((m) => parse(m, a.mailbox, now)).filter((m): m is Parsed => !!m), index);
         if (next) cursor = { ...cursor, page: next };
         else cursor = { step: cursor.step === "sent" && a.auto_create === "sent_and_received" ? "received" : "people", started_at: cursor.started_at };
         continue;
@@ -357,7 +438,7 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
         }
         const emails = cursor.batch!.map((b) => b.email).filter((e) => !isBlocked(e, rulesOf(a).blocklist));
         const { messages, next } = emails.length ? await fetchPage(mail, peopleQuery(emails, scope), cursor.page) : { messages: [], next: null };
-        const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
+        const parsed = messages.map((m) => parse(m, a.mailbox, now)).filter((m): m is Parsed => !!m);
         for (const cid of await storeAndLink(a, parsed, index)) touched.add(cid);
         stored += parsed.length;
         if (next) {
@@ -378,7 +459,7 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
       // live: everything since the last sync, all pages, then move the mark.
       const since = new Date(a.synced_until ?? now.toISOString());
       const { messages, next } = await fetchPage(mail, sinceQuery(since, scope), cursor.page);
-      const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
+      const parsed = messages.map((m) => parse(m, a.mailbox, now)).filter((m): m is Parsed => !!m);
       created += await createFrom(a, parsed, index);
       for (const cid of await storeAndLink(a, parsed, index)) touched.add(cid);
       stored += parsed.length;
@@ -388,23 +469,38 @@ export async function runSync(env: ConnectionsEnv, mailbox: string, now = new Da
         continue;
       }
       if (cursor.max_seen) a.synced_until = later(a.synced_until ?? undefined, cursor.max_seen);
+      // The mark never passes the present, whatever a message's date says.
+      if (a.synced_until && a.synced_until > now.toISOString()) a.synced_until = now.toISOString();
       cursor = { step: "live" };
       break;
     }
 
+    let checkFailed = false;
+    if (phase === "live" && cursor.step === "live" && !cursor.page && check !== "done") {
+      try {
+        const r = await checkSent(mail, a.mailbox, check, started + RUN_BUDGET_MS);
+        check = r.check;
+        forgotten += r.dropped;
+        for (const cid of r.affected) touched.add(cid);
+        checkFailed = r.failed;
+      } catch {
+        checkFailed = true; // checking is a cleanup: it never fails the sync
+      }
+    }
+
     await recomputeLastContacted(touched);
-    const more = phase === "importing" || !!cursor.page;
+    const more = phase === "importing" || !!cursor.page || (phase === "live" && check !== "done" && !checkFailed);
     await run(
       `UPDATE email_accounts SET phase = ?, import_cursor = ?, synced_until = ?, contacts_created = contacts_created + ?,
               last_run_at = ?, last_error = NULL, running_until = NULL WHERE mailbox = ?`,
-      [phase, JSON.stringify(cursor), a.synced_until, created, now.toISOString(), a.mailbox],
+      [phase, JSON.stringify({ ...cursor, check }), a.synced_until, created, now.toISOString(), a.mailbox],
     );
-    return { status: "ran", phase, step: cursor.step, created, stored, more };
+    return { status: "ran", phase, step: cursor.step, created, stored, forgotten, more };
   } catch (e) {
     const message = e instanceof Error ? e.message : "Sync failed";
     await run(
       "UPDATE email_accounts SET import_cursor = ?, contacts_created = contacts_created + ?, last_run_at = ?, last_error = ?, running_until = NULL WHERE mailbox = ?",
-      [JSON.stringify(cursor), created, now.toISOString(), message, a.mailbox],
+      [JSON.stringify({ ...cursor, check }), created, now.toISOString(), message, a.mailbox],
     );
     return { status: "error", phase, step: cursor.step, created, stored, error: message };
   }
@@ -479,7 +575,10 @@ export async function purge(mailbox: string): Promise<void> {
 
 /** Restarts the first import at `step` (messages already stored are kept and refreshed). */
 export async function restartImport(mailbox: string, step: Cursor["step"], now = new Date()): Promise<void> {
-  const cursor: Cursor = { step, started_at: now.toISOString() };
+  // The rows a restart keeps were checked against Gmail before it, or still need
+  // to be. No cursor means nothing is stored yet (new or purged), so nothing to check.
+  const prev = parseCursor((await accountFor(mailbox))?.import_cursor ?? null);
+  const cursor: Cursor = { step, started_at: now.toISOString(), check: prev ? prev.check : "done" };
   await run(
     "UPDATE email_accounts SET phase = 'importing', import_cursor = ?, next_run_at = NULL WHERE mailbox = ?",
     [JSON.stringify(cursor), mailbox],
@@ -565,7 +664,7 @@ export async function importContactIfNeeded(env: ConnectionsEnv, contactId: stri
 
   const mail = await mailFor(env, a.mailbox);
   const { messages } = await fetchPage(mail, peopleQuery([contact.email], scopeOf(a, now)), null);
-  const parsed = messages.map((m) => parse(m, a.mailbox)).filter((m): m is Parsed => !!m);
+  const parsed = messages.map((m) => parse(m, a.mailbox, now)).filter((m): m is Parsed => !!m);
   const index = new Map([[contact.email, contactId]]);
   await storeAndLink(a, parsed, index);
   await recomputeLastContacted([contactId]);
