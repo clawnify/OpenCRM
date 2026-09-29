@@ -6,7 +6,7 @@ import { InlineField } from "@/components/ui/inline-field";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, AskAi, useRecordChat } from "@/components/record-page";
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
-import { RelationInput } from "@/lib/relations";
+import { RecordChip, RelationInput } from "@/lib/relations";
 import { formatMoney, colorClasses, cn } from "@/lib/utils";
 import type { Deal, Activity, RelationRecord, StageDef } from "@/types";
 
@@ -119,11 +119,11 @@ export function DealDetail({ id, navigate, panel = false }: { id: string; naviga
           <DetailsSection title="Relations">
             <dl className="flex flex-col">
               <Attr icon={Building2} label="Company">
-                <RelationInput entity="company" value={deal.company_id} known={company} placeholder="Set company…" emptyLabel="No company"
+                <RelationInput link entity="company" value={deal.company_id} known={company} placeholder="Set company…" emptyLabel="No company"
                   onChange={(v) => void saveField({ company_id: v })} />
               </Attr>
               <Attr icon={User} label="Contact">
-                <RelationInput entity="contact" value={deal.contact_id} known={contact} placeholder="Set contact…" emptyLabel="No contact"
+                <RelationInput link entity="contact" value={deal.contact_id} known={contact} placeholder="Set contact…" emptyLabel="No contact"
                   onChange={(v) => void saveField({ contact_id: v })} />
               </Attr>
               <RelationAttrs defs={relationDefs} row={deal} onSave={(key, v) => saveField({ [key]: v } as Partial<Deal>)} />
@@ -155,8 +155,8 @@ export function DealDetail({ id, navigate, panel = false }: { id: string; naviga
                   <Tile icon={DollarSign} label="Value" empty="No value" value={deal.value ? <span className="tabular">{formatMoney(deal.value)}</span> : undefined} />
                   <Tile icon={CircleDashed} label="Stage" empty="No stage" value={stage?.label ?? deal.stage} />
                   <Tile icon={Calendar} label="Close date" empty="No close date" value={deal.close_date ? formatDay(deal.close_date) : undefined} />
-                  <Tile icon={Building2} label="Company" empty="No company" value={deal.company_name} />
-                  <Tile icon={User} label="Contact" empty="No contact" value={contactName} />
+                  <Tile icon={Building2} label="Company" empty="No company" value={company && <RecordChip entity="company" record={company} />} />
+                  <Tile icon={User} label="Contact" empty="No contact" value={contact && <RecordChip entity="contact" record={contact} />} />
                   <Tile icon={Clock} label="Last activity" empty="No activity" value={recent[0] ? formatTimestamp(recent[0].created_at) : undefined} />
                 </div>
               </section>

@@ -9,9 +9,9 @@
  */
 
 import { useEffect, useState, useSyncExternalStore, type MouseEvent } from "react";
-import { Ban, Handshake, Plus } from "lucide-react";
+import { Ban, Handshake, Pencil, Plus } from "lucide-react";
 import { Avatar, EntityIcon } from "@/components/shared";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { api } from "@/api";
 import { useCrm } from "@/context";
@@ -275,7 +275,7 @@ export function RecordPicker({ entity, selected, onPick, onClear, emptyLabel, pl
  * placeholder), which opens the picker. `emptyLabel` ("No company") is the
  * picker's row for clearing it. `known` names the current value without a fetch.
  */
-export function RelationInput({ entity, value, onChange, placeholder = "Selectâ€¦", emptyLabel, known, className }: {
+export function RelationInput({ entity, value, onChange, placeholder = "Selectâ€¦", emptyLabel, known, className, link = false, label }: {
   entity: EntityType;
   value: string | null;
   onChange: (id: string | null) => void;
@@ -283,10 +283,45 @@ export function RelationInput({ entity, value, onChange, placeholder = "Selectâ€
   emptyLabel?: string;
   known?: RelationRecord | null;
   className?: string;
+  /** On a record page: the linked record opens it, and a pencil beside it changes it. Off in forms. */
+  link?: boolean;
+  /** What the field is, for the pencil's name ("Change account manager"); the entity by default. */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const name = useRecordNames(value && known?.id !== value ? [{ entity, id: value }] : []);
   const record = value ? (known?.id === value ? known : name(entity, value)) : null;
+  const picker = (
+    <PopoverContent align="start" className="w-64">
+      <RecordPicker
+        entity={entity}
+        selected={value ? [value] : []}
+        creatable
+        emptyLabel={emptyLabel}
+        onClear={() => { setOpen(false); onChange(null); }}
+        onPick={(r) => { setOpen(false); onChange(r.id === value ? null : r.id); }}
+      />
+    </PopoverContent>
+  );
+  if (link && record) {
+    const change = `Change ${label ?? entity}`;
+    return (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverAnchor asChild>
+          <div className={cn("group/rel flex h-8 w-full min-w-0 items-center gap-1 px-2", className)}>
+            <RecordChip entity={entity} record={record} />
+            <PopoverTrigger asChild>
+              <button type="button" aria-label={change} title={change}
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm bg-card text-muted-foreground shadow-edge opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/rel:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 [[data-agent]_&]:opacity-100">
+                <Pencil className="size-3.5" aria-hidden />
+              </button>
+            </PopoverTrigger>
+          </div>
+        </PopoverAnchor>
+        {picker}
+      </Popover>
+    );
+  }
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -296,16 +331,7 @@ export function RelationInput({ entity, value, onChange, placeholder = "Selectâ€
             : <span className="text-faint">{placeholder}</span>}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64">
-        <RecordPicker
-          entity={entity}
-          selected={value ? [value] : []}
-          creatable
-          emptyLabel={emptyLabel}
-          onClear={() => { setOpen(false); onChange(null); }}
-          onPick={(r) => { setOpen(false); onChange(r.id === value ? null : r.id); }}
-        />
-      </PopoverContent>
+      {picker}
     </Popover>
   );
 }

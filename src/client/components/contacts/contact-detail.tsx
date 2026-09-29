@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Mail, Calendar, StickyNote, MessageSquare, Trophy, Star, LayoutGrid, Activity as ActivityIcon, Phone, Building2, Briefcase, AtSign, User, Clock, CheckSquare } from "lucide-react";
 import { useCrm } from "@/context";
-import { Avatar, CategoryBadge, EntityIcon } from "@/components/shared";
+import { Avatar, CategoryBadge } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,11 +9,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { InlineField } from "@/components/ui/inline-field";
 import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, AskAi, useRecordChat } from "@/components/record-page";
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
+import { RecordChip, RelationInput } from "@/lib/relations";
 import { ContactEmails } from "@/components/contacts/contact-emails";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { Contact, Activity } from "@/types";
+import type { Contact, Activity, RelationRecord } from "@/types";
 
 type FormKind = "email" | "meeting" | "note";
 
@@ -121,6 +122,9 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
     );
   }
 
+  const company: RelationRecord | undefined = contact.company_id && contact.company_name != null
+    ? { id: contact.company_id, label: contact.company_name, domain: contact.company_domain ?? null }
+    : undefined;
   const fullName = `${contact.first_name} ${contact.last_name}`.trim() || "Contact";
 
   const openFormKind = (kind: FormKind) => {
@@ -272,9 +276,9 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
                 <InlineField type="tel" value={contact.phone} placeholder="Set phone…" onSave={(v) => saveField({ phone: v })} className="tabular" />
               </Attr>
               <Attr icon={Building2} label="Company">
-                {contact.company_name ? (
-                  <span className="inline-flex h-8 items-center gap-1.5 px-2 text-sm"><EntityIcon name={contact.company_name} domain={contact.company_domain} className="size-4" /> {contact.company_name}</span>
-                ) : <span className="inline-flex h-8 items-center px-2 text-sm text-faint">Set company…</span>}
+                <RelationInput link entity="company" value={contact.company_id} placeholder="Set company…" emptyLabel="No company"
+                  known={company}
+                  onChange={(v) => void saveField({ company_id: v })} />
               </Attr>
               <Attr icon={Briefcase} label="Job title">
                 <InlineField value={contact.title} placeholder="Set job title…" onSave={(v) => saveField({ title: v })} />
@@ -303,7 +307,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
                 <div className="grid grid-cols-3 gap-3">
                   <Tile icon={AtSign} label="Email addresses" empty="No email address" value={contact.email && <a href={`mailto:${contact.email}`} className="text-info hover:underline">{contact.email}</a>} />
                   <Tile icon={Phone} label="Phone numbers" empty="No phone number" value={contact.phone} />
-                  <Tile icon={Building2} label="Company" empty="No company" value={contact.company_name} />
+                  <Tile icon={Building2} label="Company" empty="No company" value={company && <RecordChip entity="company" record={company} />} />
                   <Tile icon={Briefcase} label="Job title" empty="No job title" value={contact.title} />
                   <Tile icon={Clock} label="Last activity" empty="No activity" value={recent[0] ? formatTimestamp(recent[0].created_at) : undefined} />
                   <Tile icon={Calendar} label="Created" empty="Unknown" value={formatTimestamp(contact.created_at)} />
