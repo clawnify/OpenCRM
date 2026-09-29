@@ -75,7 +75,7 @@ a contact, the CRM keeps who wrote to whom and when. Email bodies stay in Gmail.
   when the mailbox shares everything (`can_open: true` on the email); 403 otherwise.
 - Contacts carry `last_contacted_at` (read-only), so "who haven't we emailed in a
   month" is a filter on the contacts list: `last_contacted_at` `before` a date.
-- `GET /api/email-sync` shows the settings and progress; `POST /api/email-sync/run`
+- `GET /api/email-sync` shows the settings and progress; `POST /api/email-sync/sync-now`
   syncs now.
 
 You can read synced emails and run a sync, but not change what a mailbox shares
