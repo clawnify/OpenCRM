@@ -10,3 +10,4 @@ minimumReleaseAgeExclude:
   - '@clawnify/routes'
   - '@clawnify/app'
   - '@clawnify/connections'
+  - '@clawnify/services'
