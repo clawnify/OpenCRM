@@ -69,6 +69,7 @@ function AiColumnPanel({ ai, fieldKey, label, emptyIds, chips, onDone }: {
 }) {
   const column = ai.column(fieldKey);
   const [prompt, setPrompt] = useState(column?.prompt ?? "");
+  const [research, setResearch] = useState(!!column?.research);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const pending = ai.pendingIn(fieldKey);
@@ -91,8 +92,8 @@ function AiColumnPanel({ ai, fieldKey, label, emptyIds, chips, onDone }: {
   const fill = async () => {
     setBusy(true);
     try {
-      if (!column || (ai.canConfigure && prompt !== column.prompt)) {
-        if ((await ai.save(fieldKey, prompt)) === null) return;
+      if (!column || (ai.canConfigure && (prompt !== column.prompt || research !== !!column.research))) {
+        if ((await ai.save(fieldKey, prompt, research)) === null) return;
       }
       const r = await ai.fill(fieldKey, emptyIds);
       if (r && r.queued === 0) setNote("No empty cells in the rows on screen.");
@@ -143,8 +144,8 @@ function AiColumnPanel({ ai, fieldKey, label, emptyIds, chips, onDone }: {
       </div>
 
       <label className={`flex items-center gap-2 ${label13}`}>
-        <input type="checkbox" disabled checked={false} className="size-3.5" readOnly />
-        Research the web <span className="text-faint">· coming soon</span>
+        <input type="checkbox" checked={research} disabled={!ai.canConfigure} onChange={(e) => setResearch(e.target.checked)} className="size-3.5" />
+        Research the web
       </label>
 
       {note && <p className={label13}>{note}</p>}

@@ -26,6 +26,8 @@ const STALE_MS = 3 * 60_000;
 const RUN_BUDGET_MS = 25_000;
 /** Fast and inexpensive, and served in every data region the platform routes to. */
 const MODEL = "google/gemini-3.1-flash-lite";
+/** The model research falls back to where only a model's own search is allowed (the platform's in-region search model). */
+const REGIONAL_SEARCH_MODEL = "google/gemini-3.5-flash-lite";
 /** How much of a company's homepage the model reads: enough for what they do, cheap in tokens. */
 const PAGE_CHARS = 12_000;
 /** A page read is kept this long, so one read serves every fill for that company. */
@@ -211,25 +213,39 @@ class ModelError extends Error {
 }
 
 /** One completion through the Clawnify platform, charged to the org's credits. */
-async function complete(env: AiEnv, system: string, user: string): Promise<string> {
+/**
+ * With `research`, the answer is grounded in a web search: OpenRouter's web
+ * plugin, billed with the call. Hosts pinned to a data region refuse external
+ * search engines and allow only a model's own search, so a refusal is retried
+ * once that way, on a model that has it in-region.
+ */
+async function complete(env: AiEnv, system: string, user: string, research = false): Promise<string> {
   if (!env.CLAWNIFY_TOKEN) throw new ModelError("AI isn't available here: the app has no Clawnify token");
   const base = (env.CLAWNIFY_API_URL || "https://api.clawnify.com").replace(/\/+$/, "");
-  const res = await fetch(`${base}/v1/chat/completions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.CLAWNIFY_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.2,
-      max_tokens: 600,
-      response_format: { type: "json_object" },
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
-    }),
-    signal: AbortSignal.timeout(RUN_BUDGET_MS),
-  });
-  if (res.status === 402) throw new ModelError("Out of Clawnify credits", true);
-  const body = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } } | null;
-  if (!res.ok) throw new ModelError(body?.error?.message || `The AI service answered ${res.status}`);
-  return body?.choices?.[0]?.message?.content ?? "";
+  const ask = async (extra: Record<string, unknown>) => {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.CLAWNIFY_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0.2,
+        max_tokens: 600,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        ...extra,
+      }),
+      signal: AbortSignal.timeout(RUN_BUDGET_MS),
+    });
+    if (res.status === 402) throw new ModelError("Out of Clawnify credits", true);
+    const body = await res.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } } | null;
+    return { ok: res.ok, status: res.status, error: body?.error?.message, content: body?.choices?.[0]?.message?.content ?? "" };
+  };
+  // A web answer comes back as text around the JSON (coerceAnswer finds it), so no JSON mode then.
+  let r = await ask(research ? { plugins: [{ id: "web", max_results: 5 }] } : { response_format: { type: "json_object" } });
+  if (!r.ok && research && /data region/i.test(r.error ?? "")) {
+    r = await ask({ model: REGIONAL_SEARCH_MODEL, plugins: [{ id: "web", engine: "native" }] });
+  }
+  if (!r.ok) throw new ModelError(r.error || `The AI service answered ${r.status}`);
+  return r.content;
 }
 
 function ruleFor(spec: FieldSpec): string {
@@ -382,7 +398,9 @@ async function fillCell(env: AiEnv, cell: Pick<AiCell, "entity_type" | "record_i
   const system = [
     "You fill in one field of a record in a CRM.",
     `The field is "${spec.label}". ${ruleFor(spec)}`,
-    "Use only what the record below says, the company's website when it is given, and what is common knowledge about well-known companies. If that is not enough to answer, answer null rather than guess. Never make up contact details.",
+    column.research
+      ? "Use what the record below says, the company's website when it is given, and what a web search finds about this record. If that is not enough to answer, answer null rather than guess. Never make up contact details."
+      : "Use only what the record below says, the company's website when it is given, and what is common knowledge about well-known companies. If that is not enough to answer, answer null rather than guess. Never make up contact details.",
     'Reply with JSON only: {"value": <your answer, or null>}.',
   ].join("\n");
   const user = [
@@ -392,7 +410,7 @@ async function fillCell(env: AiEnv, cell: Pick<AiCell, "entity_type" | "record_i
     page?.markdown ? `The company's website (${page.url}), as markdown:\n${page.markdown}` : "",
   ].filter(Boolean).join("\n\n");
 
-  const value = coerceAnswer(spec, await complete(env, system, user));
+  const value = coerceAnswer(spec, await complete(env, system, user, !!column.research));
   if (value === null) throw new Error("Not enough in the record to answer");
   const onlyIfEmpty = cell.overwrite ? "" : ` AND ("${key}" IS NULL OR TRIM("${key}") = '')`;
   await run(`UPDATE "${table}" SET "${key}" = ?, updated_at = datetime('now') WHERE id = ?${onlyIfEmpty}`, [value, id]);

@@ -2297,9 +2297,11 @@ app.put("/api/ai-columns/:entity/:key", async (c) => {
   if (body.prompt !== undefined && typeof body.prompt !== "string") return c.json({ error: "prompt must be text" }, 400);
   const prompt = (body.prompt ?? "").trim();
   if (prompt.length > 2000) return c.json({ error: "Keep the instructions under 2,000 characters." }, 400);
-  if (body.research === true) return c.json({ error: "Web research isn't available yet." }, 400);
+  if (body.research !== undefined && typeof body.research !== "boolean") return c.json({ error: "research must be true or false" }, 400);
+  // Left out, research keeps what the column had: saving instructions alone never switches it off.
+  const research = body.research ?? !!(await getColumn(entity, key))?.research;
   const who = user(c)?.email ?? user(c)?.id ?? null;
-  return c.json({ column: await saveColumn(entity, key, prompt, false, who) }, 200);
+  return c.json({ column: await saveColumn(entity, key, prompt, research, who) }, 200);
 });
 
 // Turn AI off for a column. Values it already wrote stay.
