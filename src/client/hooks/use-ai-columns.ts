@@ -58,7 +58,7 @@ export function useAiColumns(entity: "company" | "contact") {
     column: (key: string) => state?.columns.find((c) => c.field_key === key) ?? null,
     cell: (rowId: string, key: string) => cells.get(`${rowId}:${key}`) ?? null,
     pendingIn: (key: string) => state?.cells.filter((c) => c.field_key === key && c.status !== "error").length ?? 0,
-    save: (key: string, prompt: string) => act(() => api("PUT", `/api/ai-columns/${entity}/${key}`, { prompt })),
+    save: (key: string, prompt: string, research: boolean) => act(() => api("PUT", `/api/ai-columns/${entity}/${key}`, { prompt, research })),
     turnOff: (key: string) => act(() => api("DELETE", `/api/ai-columns/${entity}/${key}`)),
     fill: (key: string, ids: string[]) => act(() => api<{ queued: number }>("POST", `/api/ai-columns/${entity}/${key}/fill`, { ids })),
     regenerate: (key: string, id: string) => act(() => api("POST", `/api/ai-columns/${entity}/${key}/cells/${encodeURIComponent(id)}`, {})),
