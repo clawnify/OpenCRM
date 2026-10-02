@@ -4,29 +4,49 @@
   "name": "OpenCRM",
   "description": "CRM with companies, contacts, and deals pipeline. Like HubSpot. Best for customer relationship management, sales tracking, contact databases, or deal pipelines.",
   "icon": "icon.svg",
-  "tags": ["crm", "sales", "contacts", "pipeline"],
-
+  "tags": [
+    "crm",
+    "sales",
+    "contacts",
+    "pipeline"
+  ],
   "app": {
     "framework": "react+hono",
     "database": true,
     "storage": false,
-    "credentials": ["gmail", "googlecalendar", "slack"]
-  },
-
-  "env": {
-    "optional": ["SLACK_CHANNEL"]
-  },
-
-  "api": {
-    "public_routes": [
-      { "path": "/api/email-sync/run", "methods": ["POST"] },
-      { "path": "/api/ai-columns/run", "methods": ["POST"] }
+    "credentials": [
+      "gmail",
+      "googlecalendar",
+      "slack"
+    ],
+    "provides": [
+      "contacts"
     ]
   },
-
+  "env": {
+    "optional": [
+      "SLACK_CHANNEL"
+    ]
+  },
+  "api": {
+    "public_routes": [
+      {
+        "path": "/api/email-sync/run",
+        "methods": [
+          "POST"
+        ]
+      },
+      {
+        "path": "/api/ai-columns/run",
+        "methods": [
+          "POST"
+        ]
+      }
+    ]
+  },
   "deploy": {
     "title": "Deploy your CRM",
-    "subtitle": "Like HubSpot — customized for your sales process in minutes",
+    "subtitle": "Like HubSpot \u2014 customized for your sales process in minutes",
     "prompts": [
       {
         "key": "business_type",
@@ -53,6 +73,5 @@
       }
     ]
   },
-
   "agent": "agent.md"
 }
