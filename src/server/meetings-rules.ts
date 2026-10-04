@@ -381,12 +381,41 @@ export const FRESH_DAYS = 14;
 
 // ── How an account is doing ────────────────────────────────────────
 
-export type Health = "red" | "yellow" | "green";
+/**
+ * "unknown": nothing says the account is in trouble, but the CRM can't see
+ * whether anyone has been in touch, so it doesn't claim it is on track either.
+ */
+export type Health = "red" | "yellow" | "green" | "unknown";
 
 // shortcut: fixed thresholds for every workspace; make them a setting if teams ask for their own.
 /** No call or email for this long turns an account yellow, then red. */
 export const QUIET_YELLOW_DAYS = 21;
 export const QUIET_RED_DAYS = 45;
+/** A renewal this close, or already past, asks for attention. */
+export const RENEWAL_SOON_DAYS = 30;
+
+/**
+ * How well the CRM can see one channel of contact with an account. "off": not
+ * synced. "importing": the first import hasn't finished. "failing": synced, but
+ * the latest run failed, so the newest contact may be missing.
+ */
+export type SyncState = "seen" | "off" | "importing" | "failing";
+
+/**
+ * What the CRM can see of an account's contact with us. Silence is only ever
+ * claimed through a channel that would have heard it: a dashboard that can't
+ * see a customer's meetings shows the same blank as a customer who went quiet.
+ */
+export interface Sight {
+  calls: SyncState;
+  emails: SyncState;
+  /** The account's contacts with an email address the sync reads (not blocked). */
+  addressed: number;
+  /** Some contacts have an address, but every one of them is on the email blocklist. */
+  all_blocked: boolean;
+  /** First names of the addressed contacts whose email history hasn't been read yet. */
+  unread: string[];
+}
 
 export interface AccountFacts {
   last_meeting_at: string | null;
@@ -400,6 +429,9 @@ export interface AccountFacts {
   sentiments: Array<{ value: number; reason: string | null }>;
   /** Open risks noted in calls. */
   risks: string[];
+  sight: Sight;
+  /** The next renewal (YYYY-MM-DD), when someone set one. */
+  renewal_date?: string | null;
 }
 
 export interface AccountHealth {
@@ -407,6 +439,8 @@ export interface AccountHealth {
   reasons: string[];
   last_touch_at: string | null;
   days_quiet: number | null;
+  /** The reason about silence, when there is one ("No contact in 50 days"): the call to book. */
+  silence: string | null;
 }
 
 /** "2026-10-03" as "3 Oct". */
@@ -422,35 +456,97 @@ function later(a: string | null, b: string | null): string | null {
 }
 
 /**
+ * What the CRM can't see of an account, in words, and whether each channel can
+ * still be judged. A failing channel is judged on what it read before it failed;
+ * one that is off, still importing, or has no contact to read is not judged.
+ */
+export function sightGaps(v: Sight): { calls: boolean; emails: boolean; gaps: string[] } {
+  const gaps: string[] = [];
+  if (v.calls === "off") gaps.push("calls aren't synced");
+  else if (v.calls === "importing") gaps.push("calls are still importing");
+  else if (v.calls === "failing") gaps.push("the meeting sync is failing");
+
+  let emails = v.emails === "seen" || v.emails === "failing";
+  if (v.emails === "off") gaps.push("email isn't synced");
+  else if (v.emails === "importing") gaps.push("email is still importing");
+  else {
+    if (v.emails === "failing") gaps.push("the email sync is failing");
+    if (v.addressed === 0) {
+      emails = false;
+      gaps.push(v.all_blocked ? "their addresses are on the email blocklist" : "no contact has an email address");
+    } else if (v.unread.length) {
+      if (v.unread.length >= v.addressed) emails = false;
+      gaps.push(v.unread.length <= 2 ? `emails with ${v.unread.join(" and ")} aren't read yet` : `emails with ${v.unread.length} contacts aren't read yet`);
+    }
+  }
+  return { calls: v.calls === "seen" || v.calls === "failing", emails, gaps };
+}
+
+/** Days from `today` (YYYY-MM-DD, the viewer's day) to `day`: negative when it has passed. Null when it isn't a day. */
+function daysUntil(day: string, today: string): number | null {
+  const t = Date.parse(`${day.slice(0, 10)}T00:00:00Z`);
+  const from = Date.parse(`${today.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(t) || Number.isNaN(from)) return null;
+  return Math.round((t - from) / 86_400_000);
+}
+
+/**
  * Red when one of our promises is overdue, the last call went badly, a risk is
  * open, or there has been no contact for QUIET_RED_DAYS. Yellow when there has
  * been none for QUIET_YELLOW_DAYS, they owe something overdue, the mood dropped
- * since the call before, or nobody has been in touch yet. Green otherwise. Every
- * reason is said, worst first: the status is never a score nobody can explain.
+ * since the call before, a renewal is due within RENEWAL_SOON_DAYS (or passed),
+ * or nobody has been in touch yet. Green otherwise.
+ *
+ * Silence is judged only through what the CRM can see (`sight`), and the reason
+ * names what it can't: "No contact in 39 days (calls aren't synced)". When it
+ * can see neither calls nor emails and has seen no recent contact, the last
+ * reason says why ("Calls aren't synced, email isn't synced"), and an account
+ * with nothing else against it is "unknown" rather than green.
+ * Every reason is said, worst first: the status is never a score nobody can
+ * explain.
  */
-export function health(f: AccountFacts, now: Date): AccountHealth {
+export function health(f: AccountFacts, now: Date, today = now.toISOString().slice(0, 10)): AccountHealth {
   const red: string[] = [];
   const yellow: string[] = [];
   const touch = later(f.last_meeting_at, f.last_email_at);
   const quiet = touch ? Math.max(0, Math.floor((now.getTime() - Date.parse(touch)) / 86_400_000)) : null;
+
+  // Recent contact the CRM has seen settles it, whatever it can't see. Silence
+  // is claimed only through a channel it can see, naming the ones it can't.
+  const seen = sightGaps(f.sight);
+  const judged = seen.calls || seen.emails || (quiet !== null && quiet <= QUIET_YELLOW_DAYS);
+  const unseen = seen.gaps.length ? ` (${seen.gaps.join(", ")})` : "";
+  let silence: string | null = null;
+  if (seen.calls || seen.emails) {
+    if (quiet === null) silence = `No ${seen.calls && seen.emails ? "calls or emails" : seen.calls ? "calls" : "emails"} yet${unseen}`;
+    else if (quiet > QUIET_YELLOW_DAYS) silence = `No contact in ${quiet} days${unseen}`;
+  }
 
   if (f.ours_overdue.length === 1) red.push(`Overdue: ${f.ours_overdue[0].title} (due ${shortDay(f.ours_overdue[0].due_date)})`);
   else if (f.ours_overdue.length > 1) red.push(`${f.ours_overdue.length} of our promises are overdue`);
   const [mood, before] = f.sentiments;
   if (mood && mood.value <= -1) red.push(mood.reason ? `Last call went badly: ${mood.reason}` : "Last call went badly");
   if (f.risks.length) red.push(`Risk: ${f.risks[0]}${f.risks.length > 1 ? ` (and ${f.risks.length - 1} more)` : ""}`);
-  if (quiet !== null && quiet > QUIET_RED_DAYS) red.push(`No contact in ${quiet} days`);
+  if (silence && quiet !== null && quiet > QUIET_RED_DAYS) red.push(silence);
 
-  if (quiet !== null && quiet > QUIET_YELLOW_DAYS && quiet <= QUIET_RED_DAYS) yellow.push(`No contact in ${quiet} days`);
+  if (silence && (quiet === null || quiet <= QUIET_RED_DAYS)) yellow.push(silence);
   if (f.theirs_overdue.length) yellow.push(`Waiting on them: ${f.theirs_overdue[0].title}${f.theirs_overdue.length > 1 ? ` (and ${f.theirs_overdue.length - 1} more)` : ""}`);
   if (mood && before && mood.value < before.value && mood.value <= 0 && mood.value > -1) yellow.push("The mood dropped since the call before");
-  if (!touch) yellow.push("No calls or emails yet");
+  const renews = f.renewal_date ? daysUntil(f.renewal_date, today) : null;
+  if (renews !== null && renews < 0) yellow.push(`The renewal date (${shortDay(f.renewal_date!)}) has passed: set the next one`);
+  else if (renews !== null && renews <= RENEWAL_SOON_DAYS) yellow.push(renews === 0 ? "Renews today" : `Renews in ${renews} day${renews === 1 ? "" : "s"}`);
 
+  const reasons = [...red, ...yellow];
+  if (!judged) {
+    const why = seen.gaps.join(", ");
+    reasons.push(`${why.charAt(0).toUpperCase()}${why.slice(1)}`);
+  }
   return {
-    status: red.length ? "red" : yellow.length ? "yellow" : "green",
-    reasons: [...red, ...yellow],
+    status: red.length ? "red" : yellow.length ? "yellow" : judged ? "green" : "unknown",
+    reasons,
     last_touch_at: touch,
     days_quiet: quiet,
+    silence,
   };
 }
 
@@ -459,14 +555,16 @@ export interface FocusAccount {
   name: string;
   status: Health;
   next_meeting_at: string | null;
-  days_quiet: number | null;
+  /** The account's reason about silence (AccountHealth.silence), when there is one. */
+  silence: string | null;
+  renewal_date?: string | null;
   ours_overdue: Array<{ id: string; title: string; due_date: string }>;
   ours_due_today: Array<{ id: string; title: string }>;
   risks: string[];
 }
 
 export interface FocusItem {
-  kind: "overdue" | "reach_out" | "due_today" | "risk";
+  kind: "overdue" | "reach_out" | "renewal" | "due_today" | "risk";
   company_id: string;
   company_name: string;
   text: string;
@@ -475,15 +573,23 @@ export interface FocusItem {
 
 /**
  * The few things worth doing first across all customers: our overdue promises,
- * oldest first; then red accounts with no call booked; then what we owe today;
- * then open risks. At most `limit`.
+ * oldest first; then red accounts with no call booked; then renewals due within
+ * RENEWAL_SOON_DAYS, soonest first; then what we owe today; then open risks.
+ * At most `limit`.
  */
-export function focus(accounts: FocusAccount[], limit = 3): FocusItem[] {
+export function focus(accounts: FocusAccount[], limit = 3, today = new Date().toISOString().slice(0, 10)): FocusItem[] {
   const out: FocusItem[] = [];
   const overdue = accounts.flatMap((a) => a.ours_overdue.map((t) => ({ a, t }))).sort((x, y) => x.t.due_date.localeCompare(y.t.due_date));
   for (const { a, t } of overdue) out.push({ kind: "overdue", company_id: a.id, company_name: a.name, text: `${t.title} (was due ${shortDay(t.due_date)})`, task_id: t.id });
   for (const a of accounts.filter((x) => x.status === "red" && !x.next_meeting_at)) {
-    out.push({ kind: "reach_out", company_id: a.id, company_name: a.name, text: a.days_quiet !== null ? `Book a call: no contact in ${a.days_quiet} days` : "Book a first call" });
+    out.push({ kind: "reach_out", company_id: a.id, company_name: a.name, text: a.silence ? `Book a call: ${a.silence.charAt(0).toLowerCase()}${a.silence.slice(1)}` : "Book a call" });
+  }
+  const renewing = accounts
+    .map((a) => ({ a, days: a.renewal_date ? daysUntil(a.renewal_date, today) : null }))
+    .filter((x): x is { a: FocusAccount; days: number } => x.days !== null && x.days >= 0 && x.days <= RENEWAL_SOON_DAYS)
+    .sort((x, y) => x.days - y.days);
+  for (const { a, days } of renewing) {
+    out.push({ kind: "renewal", company_id: a.id, company_name: a.name, text: days === 0 ? "Renews today" : `Renews in ${days} day${days === 1 ? "" : "s"} (${shortDay(a.renewal_date!)})` });
   }
   for (const a of accounts) for (const t of a.ours_due_today) out.push({ kind: "due_today", company_id: a.id, company_name: a.name, text: t.title, task_id: t.id });
   for (const a of accounts) for (const r of a.risks) out.push({ kind: "risk", company_id: a.id, company_name: a.name, text: r });

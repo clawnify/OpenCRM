@@ -200,13 +200,18 @@ function scopeOf(a: EmailAccount, now: Date): Scope {
   return { labels: jsonArray(a.labels).filter((l): l is string => typeof l === "string"), since: historyStart(a.history, now) };
 }
 
+/** The addresses and @domains this mailbox never imports. */
+export function blocklistOf(a: EmailAccount): string[] {
+  return normaliseBlocklist(jsonArray(a.blocklist));
+}
+
 function rulesOf(a: EmailAccount): CreateRules {
   return {
     mailbox: a.mailbox,
     policy: a.auto_create,
     excludeGroup: !!a.exclude_group,
     excludePersonal: !!a.exclude_personal,
-    blocklist: normaliseBlocklist(jsonArray(a.blocklist)),
+    blocklist: blocklistOf(a),
     isPersonalDomain: (d) => FREEMAIL_DOMAINS.has(d),
   };
 }

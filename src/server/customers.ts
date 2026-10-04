@@ -1,16 +1,22 @@
 // Customers: every company with a `customer_since`, and how each is doing. The
 // facts come from the CRM (meetings and their digests, emails, tasks, insights)
-// in a few grouped reads; the status and its reasons from meetings-rules.ts.
-// Nothing here is stored: it is worked out on every read.
+// in a few grouped reads, with what the CRM can see of each account (whether the
+// meeting and email syncs are on and working, and which contacts' emails have
+// been read); the status and its reasons from meetings-rules.ts. Nothing here is
+// stored: it is worked out on every read.
 
 import { query } from "./db.js";
-import { health, focus, type AccountHealth, type FocusItem, type Health } from "./meetings-rules.js";
+import { blocklistOf, currentAccount } from "./email-sync.js";
+import { isBlocked } from "./email-sync-rules.js";
+import { syncSettings } from "./meetings.js";
+import { health, focus, type AccountHealth, type FocusAccount, type FocusItem, type Health, type SyncState } from "./meetings-rules.js";
 
-export interface CustomerRow extends AccountHealth {
+export interface CustomerRow extends Omit<AccountHealth, "silence"> {
   id: string;
   name: string;
   domain: string;
   customer_since: string;
+  renewal_date: string | null;
   last_meeting_at: string | null;
   next_meeting_at: string | null;
   last_summary: string | null;
@@ -49,20 +55,29 @@ export function localDay(now: Date, tz: number): string {
   return new Date(now.getTime() + tz * 60_000).toISOString().slice(0, 10);
 }
 
-const SEVERITY: Record<Health, number> = { red: 0, yellow: 1, green: 2 };
+const SEVERITY: Record<Health, number> = { red: 0, yellow: 1, unknown: 2, green: 3 };
+
+/** Whether a sync is on, past its first import, and its latest run worked. */
+function syncState(s: { enabled: number; phase: string; last_error: string | null } | null): SyncState {
+  if (!s?.enabled) return "off";
+  if (s.phase !== "live") return "importing";
+  return s.last_error ? "failing" : "seen";
+}
 
 /**
  * Every customer with its status and reasons, worst first; the few things worth
- * doing first; and the calls with customers in the next seven days.
+ * doing first; the calls with customers in the next seven days; and whether the
+ * CRM can see calls and emails at all.
  */
 export async function customersOverview(now = new Date(), tz = 0): Promise<{
   customers: CustomerRow[];
   focus: FocusItem[];
   upcoming: UpcomingCall[];
   counts: Record<Health, number>;
+  sight: { calls: SyncState; emails: SyncState };
 }> {
-  const companies = await query<{ id: string; name: string; domain: string; customer_since: string }>(
-    "SELECT id, name, domain, customer_since FROM companies WHERE customer_since IS NOT NULL AND TRIM(customer_since) != '' ORDER BY name",
+  const companies = await query<{ id: string; name: string; domain: string; customer_since: string; renewal_date: string | null }>(
+    "SELECT id, name, domain, customer_since, renewal_date FROM companies WHERE customer_since IS NOT NULL AND TRIM(customer_since) != '' ORDER BY name",
   );
   const ids = companies.map((c) => c.id);
   const nowIso = now.toISOString();
@@ -93,6 +108,22 @@ export async function customersOverview(now = new Date(), tz = 0): Promise<{
     `SELECT company_id, kind, text FROM insights WHERE status = 'open' AND company_id IN (${m}) ORDER BY created_at DESC`,
   );
 
+  const callSight = syncState(await syncSettings());
+  const mailbox = await currentAccount();
+  const emailSight = syncState(mailbox);
+  // Which contacts the email sync reads, and whose history it has read: a
+  // contact added after the first import is read the first time it is opened.
+  const people = mailbox && (emailSight === "seen" || emailSight === "failing")
+    ? await inChunks<{ company_id: string; first_name: string; email: string; imported: string | null }>(ids, (m) =>
+      `SELECT c.company_id, c.first_name, lower(trim(c.email)) AS email,
+              (SELECT i.email FROM email_contact_imports i WHERE i.mailbox = ? AND i.contact_id = c.id) AS imported
+         FROM contacts c WHERE c.email IS NOT NULL AND TRIM(c.email) != '' AND c.company_id IN (${m})
+        ORDER BY c.first_name`,
+      [mailbox.mailbox],
+    )
+    : [];
+  const blocklist = mailbox ? blocklistOf(mailbox) : [];
+
   const by = <T extends { company_id: string }>(rows: T[]) => {
     const map = new Map<string, T[]>();
     for (const r of rows) map.set(r.company_id, [...(map.get(r.company_id) ?? []), r]);
@@ -103,8 +134,9 @@ export async function customersOverview(now = new Date(), tz = 0): Promise<{
   const moodsBy = by(moods);
   const tasksBy = by(tasks);
   const insightsBy = by(insights);
+  const peopleBy = by(people);
 
-  const focusInput = [];
+  const focusInput: FocusAccount[] = [];
   const customers: CustomerRow[] = [];
   for (const c of companies) {
     const mt = meetingsBy.get(c.id)?.[0];
@@ -115,7 +147,8 @@ export async function customersOverview(now = new Date(), tz = 0): Promise<{
     const overdue = (list: typeof open) => list.filter((t): t is typeof t & { due_date: string } => !!t.due_date && t.due_date < today);
     const notes = insightsBy.get(c.id) ?? [];
     const risks = notes.filter((i) => i.kind === "risk").map((i) => i.text);
-    const h = health({
+    const read = (peopleBy.get(c.id) ?? []).filter((p) => !isBlocked(p.email, blocklist));
+    const { silence, ...h } = health({
       last_meeting_at: mt?.last_at ?? null,
       last_email_at: emailsBy.get(c.id)?.[0]?.last_at ?? null,
       next_meeting_at: mt?.next_at ?? null,
@@ -123,12 +156,21 @@ export async function customersOverview(now = new Date(), tz = 0): Promise<{
       theirs_overdue: overdue(theirs),
       sentiments: mood.filter((m) => m.sentiment !== null).map((m) => ({ value: m.sentiment, reason: m.sentiment_reason })),
       risks,
-    }, now);
+      sight: {
+        calls: callSight,
+        emails: emailSight,
+        addressed: read.length,
+        all_blocked: read.length === 0 && (peopleBy.get(c.id)?.length ?? 0) > 0,
+        unread: read.filter((p) => p.imported !== p.email).map((p) => p.first_name),
+      },
+      renewal_date: c.renewal_date,
+    }, now, today);
     customers.push({
       id: c.id,
       name: c.name,
       domain: c.domain,
       customer_since: c.customer_since,
+      renewal_date: c.renewal_date || null,
       ...h,
       last_meeting_at: mt?.last_at ?? null,
       next_meeting_at: mt?.next_at ?? null,
@@ -146,7 +188,8 @@ export async function customersOverview(now = new Date(), tz = 0): Promise<{
       name: c.name,
       status: h.status,
       next_meeting_at: mt?.next_at ?? null,
-      days_quiet: h.days_quiet,
+      silence,
+      renewal_date: c.renewal_date,
       ours_overdue: overdue(ours).map((t) => ({ id: t.id, title: t.title, due_date: t.due_date })),
       ours_due_today: ours.filter((t) => t.due_date === today).map((t) => ({ id: t.id, title: t.title })),
       risks,
@@ -168,7 +211,7 @@ export async function customersOverview(now = new Date(), tz = 0): Promise<{
       return { id: m.id, title: m.title, starts_at: m.starts_at, company_id: m.company_id, company_name: c.name, company_domain: c.domain, ours_open: c.ours_open, last_summary: c.last_summary };
     });
 
-  const counts: Record<Health, number> = { red: 0, yellow: 0, green: 0 };
+  const counts: Record<Health, number> = { red: 0, yellow: 0, unknown: 0, green: 0 };
   for (const c of customers) counts[c.status]++;
-  return { customers, focus: focus(focusInput), upcoming, counts };
+  return { customers, focus: focus(focusInput, 3, today), upcoming, counts, sight: { calls: callSight, emails: emailSight } };
 }

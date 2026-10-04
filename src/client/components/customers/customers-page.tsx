@@ -1,20 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlarmClock, Check, PhoneCall, TriangleAlert, CalendarCheck } from "lucide-react";
+import { AlarmClock, Check, PhoneCall, TriangleAlert, CalendarCheck, CalendarClock } from "lucide-react";
 import { useCrm } from "@/context";
 import { api } from "@/api";
 import { EntityIcon, EmptyState, PageHeader } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Eyebrow, HEALTH, HealthPill, StatusPill, daysAgo, meetingWhen, tzOffset } from "@/components/meetings/shared";
-import { cn } from "@/lib/utils";
-import type { CustomersOverview, FocusItem, MeetingSyncStatus } from "@/types";
+import { cn, formatDate } from "@/lib/utils";
+import type { CustomersOverview, FocusItem, MeetingSyncStatus, SyncState } from "@/types";
 
 const FOCUS_ICON: Record<FocusItem["kind"], typeof AlarmClock> = {
   overdue: AlarmClock,
   due_today: CalendarCheck,
   reach_out: PhoneCall,
+  renewal: CalendarClock,
   risk: TriangleAlert,
 };
+
+const CHANNELS = [
+  { key: "calls", off: "calls aren't synced", importing: "calls are still importing", failing: "the meeting sync is failing", href: "/settings/meetings", setup: "Set up meetings", open: "Meeting settings" },
+  { key: "emails", off: "email isn't synced", importing: "email is still importing", failing: "the email sync is failing", href: "/settings/email", setup: "Set up email", open: "Email settings" },
+] as const;
+
+/** What the CRM can't see, as one sentence, and where to fix each part; null when it sees both. */
+function sightNotice(sight: CustomersOverview["sight"]) {
+  const gaps = CHANNELS.flatMap((ch) => {
+    const state: SyncState = sight[ch.key];
+    return state === "seen" ? [] : [{ text: ch[state], href: ch.href, label: state === "off" ? ch.setup : ch.open }];
+  });
+  if (!gaps.length) return null;
+  const said = gaps.map((g) => g.text).join(" and ");
+  return { text: `${said.charAt(0).toUpperCase()}${said.slice(1)}, so the CRM can't see all your contact with customers.`, links: gaps };
+}
 
 /**
  * Customers: how each account is doing, worst first, with the reasons in plain
@@ -58,7 +75,7 @@ export function CustomersPage({ navigate }: { navigate: (to: string) => void }) 
   };
 
   const open = (id: string) => navigate(`/companies/${encodeURIComponent(id)}`);
-  const syncOff = !!sync && !sync.settings?.enabled;
+  const notice = data ? sightNotice(data.sight) : null;
 
   if (!data) {
     return (
@@ -74,7 +91,7 @@ export function CustomersPage({ navigate }: { navigate: (to: string) => void }) 
       <PageHeader title="Customers" count={data.customers.length}>
         {data.customers.length > 0 && (
           <div className="flex items-center gap-1.5">
-            {(["red", "yellow", "green"] as const).map((s) => data.counts[s] > 0 && (
+            {(["red", "yellow", "unknown", "green"] as const).map((s) => data.counts[s] > 0 && (
               <StatusPill key={s} tone={HEALTH[s].tone}><span className="tabular">{data.counts[s]}</span> {HEALTH[s].label.toLowerCase()}</StatusPill>
             ))}
           </div>
@@ -89,10 +106,12 @@ export function CustomersPage({ navigate }: { navigate: (to: string) => void }) 
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex flex-col gap-8 p-6">
-            {syncOff && (
+            {notice && (
               <p className="rounded-md bg-info-tint px-3 py-2 text-[0.8125rem] text-info">
-                Meetings aren't synced yet, so calls, promises and ideas from calls are missing here.{" "}
-                <button type="button" className="font-medium underline" onClick={() => navigate("/settings/meetings")}>Set up meetings</button>
+                {notice.text}
+                {sync?.can_configure && notice.links.map((l, i) => (
+                  <span key={l.href}>{i > 0 ? " · " : " "}<button type="button" className="font-medium underline" onClick={() => navigate(l.href)}>{l.label}</button></span>
+                ))}
               </p>
             )}
 
@@ -133,6 +152,7 @@ export function CustomersPage({ navigate }: { navigate: (to: string) => void }) 
                       <TableHead width={340}>Status</TableHead>
                       <TableHead width={120}>Last contact</TableHead>
                       <TableHead width={150}>Next call</TableHead>
+                      <TableHead width={120}>Renews</TableHead>
                       <TableHead width={130} className="text-right">Our promises</TableHead>
                       <TableHead width={120} className="text-right">Waiting on them</TableHead>
                       <TableHead width={80} className="text-right">Ideas</TableHead>
@@ -158,6 +178,7 @@ export function CustomersPage({ navigate }: { navigate: (to: string) => void }) 
                         </TableCell>
                         <TableCell className="tabular">{daysAgo(c.days_quiet)}</TableCell>
                         <TableCell className="tabular">{c.next_meeting_at ? meetingWhen(c.next_meeting_at) : <span className="text-faint">None booked</span>}</TableCell>
+                        <TableCell className="tabular">{c.renewal_date ? formatDate(c.renewal_date) : <span className="text-faint">Not set</span>}</TableCell>
                         <TableCell className="text-right tabular">
                           {c.ours_open}
                           {c.ours_overdue > 0 && <span className="text-destructive"> · {c.ours_overdue} late</span>}

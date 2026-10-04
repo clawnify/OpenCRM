@@ -24,6 +24,7 @@ export const HEALTH: Record<HealthStatus, { label: string; tone: Tone }> = {
   red: { label: "At risk", tone: "danger" },
   yellow: { label: "Watch", tone: "warning" },
   green: { label: "On track", tone: "success" },
+  unknown: { label: "Can't tell", tone: "neutral" },
 };
 
 export function HealthPill({ status }: { status: HealthStatus }) {
