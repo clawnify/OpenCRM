@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, ExternalLink, Plus } from "lucide-react";
 import { useCrm } from "@/context";
 import { api } from "@/api";
+import { EmailView } from "@/components/email/email-view";
 import { Button } from "@/components/ui/button";
 import { formatDate, cn } from "@/lib/utils";
 import type { ContactEmail } from "@/types";
@@ -34,7 +35,7 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
   const { changes } = useCrm();
   const [data, setData] = useState<{ emails: ContactEmail[]; total: number; sync_on: boolean } | null>(null);
   const [all, setAll] = useState(false);
-  const [open, setOpen] = useState<Record<string, string | null>>({});
+  const [viewing, setViewing] = useState<ContactEmail | null>(null);
 
   const load = () =>
     api<{ emails: ContactEmail[]; total: number; sync_on: boolean }>("GET", `/api/contacts/${encodeURIComponent(contactId)}/emails`)
@@ -47,20 +48,6 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
     seen.current = changes;
     void load();
   }, [changes]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const toggle = async (e: ContactEmail) => {
-    if (e.id in open) {
-      setOpen(({ [e.id]: _, ...rest }) => rest);
-      return;
-    }
-    setOpen((o) => ({ ...o, [e.id]: null }));
-    try {
-      const r = await api<{ text: string }>("GET", `/api/emails/${encodeURIComponent(e.mailbox)}/${encodeURIComponent(e.id)}`);
-      setOpen((o) => ({ ...o, [e.id]: r.text || "(This email has no text.)" }));
-    } catch (err) {
-      setOpen((o) => ({ ...o, [e.id]: err instanceof Error ? err.message : "Could not open this email" }));
-    }
-  };
 
   const emails = data?.emails ?? [];
   const shown = all ? emails : emails.slice(0, FIRST);
@@ -90,7 +77,6 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
           {shown.map((e) => {
             const sent = e.direction === "sent";
             const other = sent ? e.to_emails.join(", ") : e.from_name || e.from_email;
-            const body = open[e.id];
             return (
               <li key={`${e.mailbox}:${e.id}`} className="[&+li]:border-t [&+li]:border-border">
                 <div className="flex items-start gap-3 px-3.5 py-2.5">
@@ -98,7 +84,7 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
                     {sent ? <ArrowUpRight className="size-3" /> : <ArrowDownLeft className="size-3" />}
                   </span>
                   <button
-                    type="button" disabled={!e.can_open} onClick={() => void toggle(e)} aria-expanded={e.can_open ? e.id in open : undefined}
+                    type="button" disabled={!e.can_open} onClick={() => setViewing(e)} aria-haspopup={e.can_open ? "dialog" : undefined}
                     className="flex min-w-0 flex-1 flex-col gap-0.5 text-left disabled:cursor-default"
                   >
                     <span className={cn("truncate text-sm", e.subject ? "text-foreground" : "text-muted-foreground")}>{e.subject || (sent ? "Email sent" : "Email received")}</span>
@@ -109,11 +95,6 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
                     <ExternalLink className="size-3.5" />
                   </a>
                 </div>
-                {e.id in open && (
-                  <p className="mx-3.5 mb-3 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-md bg-secondary/50 p-3 text-[0.8125rem]">
-                    {body ?? "Loading…"}
-                  </p>
-                )}
               </li>
             );
           })}
@@ -124,6 +105,7 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
           {all ? "Show fewer" : data && data.total > emails.length ? `Show the latest ${emails.length} of ${data.total}` : `Show all ${emails.length}`}
         </button>
       )}
+      <EmailView email={viewing} onClose={() => setViewing(null)} />
     </section>
   );
 }
