@@ -15,6 +15,8 @@ import { DealsBoard } from "./components/deals/deals-board";
 import { DealDetail } from "./components/deals/deal-detail";
 import { PropertiesPage } from "./components/properties/properties-page";
 import { EmailSyncPage } from "./components/email-sync/email-sync-page";
+import { CustomersPage } from "./components/customers/customers-page";
+import { MeetingsSettingsPage } from "./components/meetings/meetings-settings-page";
 import { RecordPanel, RecordPanelHeader } from "./components/record-page";
 
 // One definition of the navigation. <AppNav> paints it as this app's own
@@ -29,10 +31,12 @@ const RECORDS: AppNavItem[] = [
   { id: "contacts", label: "Contacts", href: "/contacts", icon: "users", color: "blue" },
   { id: "companies", label: "Companies", href: "/companies", icon: "building-2", color: "violet" },
   { id: "deals", label: "Deals", href: "/deals", icon: "dollar-sign", color: "green" },
+  { id: "customers", label: "Customers", href: "/customers", icon: "activity", color: "orange" },
 ];
 const SETTINGS: AppNavItem[] = [
   { id: "properties", label: "Attributes", href: "/settings/properties", icon: "layers" },
   { id: "email-sync", label: "Email", href: "/settings/email", icon: "mail" },
+  { id: "meetings-sync", label: "Meetings", href: "/settings/meetings", icon: "calendar" },
 ];
 
 function activeFor(route: Route): string {
@@ -66,7 +70,7 @@ export function App() {
   // <AppNav>, because the SDK has no slot for it; the proper home is the SDK.
   const [navCollapsed, setNavCollapsed] = useState(false);
 
-  const counts: Record<string, number> = { contacts: state.stats.contacts, companies: state.stats.companies, deals: state.stats.deals };
+  const counts: Record<string, number> = { contacts: state.stats.contacts, companies: state.stats.companies, deals: state.stats.deals, customers: state.stats.customers };
   const groups = [
     { items: RECORDS.map((n) => (counts[n.id] ? { ...n, count: counts[n.id] } : n)) },
     { label: "Settings", items: SETTINGS },
@@ -137,8 +141,10 @@ export function App() {
                 </div>
               )}
               {route.name === "deal" && <DealDetail id={route.id} navigate={navigate} />}
+              {route.name === "customers" && <CustomersPage navigate={navigate} />}
               {route.name === "properties" && <PropertiesPage />}
               {route.name === "email-sync" && <EmailSyncPage />}
+              {route.name === "meetings-sync" && <MeetingsSettingsPage />}
               {route.name === "not-found" && (
                 <div className="flex flex-1 flex-col items-center justify-center gap-2 p-12 text-center">
                   <h1 className="text-xl font-bold tracking-tight">Not found</h1>

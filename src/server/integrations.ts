@@ -10,24 +10,27 @@
 // Keeping the (service, action) pairs here means a Composio rename is a one-line
 // edit, not a hunt across the codebase.
 
-import { connect, describe, type ConnectionsEnv } from "@clawnify/connections";
+import { connect, describe, type ConnectionsEnv, type GenericClient } from "@clawnify/connections";
 
 // Canonical service ids (never invent these — they come from the Clawnify
 // connections catalog). Mail goes through Gmail and meetings through Google
 // Calendar; Google Workspace (googlesuper) covers both, and stands in for
 // whichever of the two the org hasn't connected. slack = Slack. All
-// Composio-managed.
+// Composio-managed, except Granola (call notes and transcripts): an API key
+// the platform holds, reached with connect("granola").get(…) on Granola's own API.
 export const SERVICES = {
   email: "gmail",
   meeting: "googlecalendar",
   google: "googlesuper",
   slack: "slack",
+  notes: "granola",
 } as const;
 
 export interface ConnectionStatus {
   email: boolean;
   meeting: boolean;
   slack: boolean;
+  notes: boolean;
 }
 
 /**
@@ -68,12 +71,23 @@ export async function connectionStatus(env: ConnectionsEnv): Promise<ConnectionS
     email: !!serviceFor(connected, SERVICES.email),
     meeting: !!serviceFor(connected, SERVICES.meeting),
     slack: connected.has(SERVICES.slack),
+    notes: connected.has(SERVICES.notes),
   };
 }
 
 /** The org's mail: Gmail, or Google Workspace when Gmail isn't connected. */
 export async function mailConnection(env: ConnectionsEnv): Promise<GoogleConnection | null> {
   return google(env, await connectedServices(env), SERVICES.email);
+}
+
+/** The org's calendar: Google Calendar, or Google Workspace when Calendar isn't connected. */
+export async function calendarConnection(env: ConnectionsEnv): Promise<GoogleConnection | null> {
+  return google(env, await connectedServices(env), SERVICES.meeting);
+}
+
+/** Granola's API with the org's key, or null when Granola isn't connected. */
+export async function notesConnection(env: ConnectionsEnv): Promise<GenericClient | null> {
+  return (await connectedServices(env)).has(SERVICES.notes) ? connect(SERVICES.notes, env) : null;
 }
 
 /** Who an email goes to. `to` holds at least one address. */

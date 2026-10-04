@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Mail, Star, LayoutGrid, Activity as ActivityIcon, Phone, Globe, Building2, Tag, AtSign, Users, StickyNote, Calendar, Clock, CheckSquare } from "lucide-react";
+import { ArrowLeft, Mail, Star, LayoutGrid, Activity as ActivityIcon, Phone, Globe, Building2, Tag, AtSign, Users, StickyNote, Calendar, CalendarDays, Clock, CheckSquare, BadgeCheck } from "lucide-react";
 import { useCrm } from "@/context";
 import { EntityIcon, CategoryBadge } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,10 @@ import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, As
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ValuesMenu } from "@/components/cell-editors";
-import { cn } from "@/lib/utils";
+import { MeetingsSection } from "@/components/meetings/meetings-section";
+import { TasksSection } from "@/components/tasks/tasks-section";
+import { InsightsSection } from "@/components/insights/insights-section";
+import { cn, formatDate } from "@/lib/utils";
 import { useComposer } from "@/components/email/composer";
 import type { Company, Activity } from "@/types";
 
@@ -28,6 +31,8 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
   const [company, setCompany] = useState<Company | null | undefined>(undefined);
   useRecordChat("company", "Company", id, company ? company.name : undefined);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [taskCount, setTaskCount] = useState(0);
+  const [meetingCount, setMeetingCount] = useState(0);
 
   const saveField = async (patch: Partial<Company>) => {
     if (!company) return;
@@ -124,6 +129,10 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
               <Attr icon={StickyNote} label="Description">
                 <InlineField value={company.notes} placeholder="Set description…" onSave={(v) => saveField({ notes: v })} />
               </Attr>
+              <Attr icon={BadgeCheck} label="Customer since">
+                <InlineField type="date" value={company.customer_since ?? ""} placeholder="Not a customer" onSave={(v) => saveField({ customer_since: v || null })}
+                  render={(v) => <span className="tabular">{formatDate(v)}</span>} />
+              </Attr>
               <RelationAttrs defs={relationDefs} row={company} onSave={(key, v) => saveField({ [key]: v } as Partial<Company>)} />
             </dl>
             <button type="button" className="mt-1 h-8 text-[0.8125rem] text-muted-foreground hover:text-foreground">View all values</button>
@@ -141,9 +150,10 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
             { key: "overview", label: "Overview", icon: LayoutGrid },
             { key: "activity", label: "Activity", icon: ActivityIcon, count: activities.length },
             { key: "emails", label: "Emails", icon: Mail, count: emailCount },
+            { key: "meetings", label: "Meetings", icon: CalendarDays, count: meetingCount },
             { key: "team", label: "Team", icon: Users, count: company.contact_count ?? 0 },
             { key: "notes", label: "Notes", icon: StickyNote, count: noteCount },
-            { key: "tasks", label: "Tasks", icon: CheckSquare, count: 0 },
+            { key: "tasks", label: "Tasks", icon: CheckSquare, count: taskCount },
           ]} />}
 
           <div className={cn("flex flex-col gap-8", panel ? "p-4" : "p-6")}>
@@ -160,6 +170,10 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
                 </div>
               </section>
             )}
+
+            <MeetingsSection companyId={company.id} onCount={setMeetingCount} />
+            <TasksSection companyId={company.id} onCount={setTaskCount} />
+            <InsightsSection companyId={company.id} navigate={navigate} />
 
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
@@ -183,7 +197,6 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
 
             <FutureSection label="Emails" count={emailCount} />
             <FutureSection label="Notes" count={noteCount} />
-            <FutureSection label="Tasks" count={0} />
           </div>
         </main>
       </div>

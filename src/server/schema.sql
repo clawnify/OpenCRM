@@ -9,6 +9,10 @@ CREATE TABLE IF NOT EXISTS companies (
   phone TEXT DEFAULT '',
   email TEXT DEFAULT '',
   notes TEXT DEFAULT '',
+  -- The day they became a customer (YYYY-MM-DD); NULL = not a customer. Set by
+  -- hand, or from the close date of their first won deal. Customers are the
+  -- accounts on the Customers page.
+  customer_since TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -254,3 +258,97 @@ CREATE TABLE IF NOT EXISTS company_pages (
   error TEXT,
   fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Meetings: the org's calendar and its Granola notes, read into the CRM
+-- (meetings.ts). One row of settings and progress.
+CREATE TABLE IF NOT EXISTS meeting_sync (
+  id INTEGER PRIMARY KEY,                   -- always 1
+  enabled INTEGER NOT NULL DEFAULT 0,
+  history_days INTEGER NOT NULL DEFAULT 90, -- how far back the first import reads
+  about TEXT NOT NULL DEFAULT '',           -- what we sell: frames the ideas and expansion the AI notes
+  calendar_owner TEXT,                      -- the address whose calendar is read
+  phase TEXT NOT NULL DEFAULT 'idle',       -- 'idle' | 'importing' | 'live'
+  cursor TEXT,                              -- JSON: where the import resumes
+  calendar_synced_at TEXT,                  -- when the calendar window was last read in full
+  notes_synced_until TEXT,                  -- newest Granola note update read; later reads start here
+  last_run_at TEXT,
+  last_error TEXT,
+  running_until TEXT,                       -- a run's lease
+  job_id TEXT,
+  next_run_at TEXT,
+  updated_by TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- One meeting with people from outside: from the calendar, its Granola note, or
+-- both. A meeting with no one from outside is kept only as a time slot
+-- (link_status 'internal': no title, no people), so a note taken in it is known
+-- to be internal; it is never shown. The transcript stays in Granola; the
+-- summary and what the call produced (tasks, insights) are kept.
+CREATE TABLE IF NOT EXISTS meetings (
+  id TEXT PRIMARY KEY,
+  calendar_event_id TEXT UNIQUE,            -- Google Calendar event id
+  note_id TEXT UNIQUE,                      -- Granola note id
+  title TEXT NOT NULL DEFAULT '',
+  starts_at TEXT NOT NULL,                  -- ISO 8601, UTC
+  ends_at TEXT,
+  attendees TEXT NOT NULL DEFAULT '[]',     -- JSON [{email, name}]: the outside people
+  company_id TEXT REFERENCES companies(id) ON DELETE SET NULL,
+  link_status TEXT NOT NULL DEFAULT 'unmatched', -- 'auto' | 'manual' | 'unmatched' | 'ignored' | 'internal'
+  calendar_url TEXT,
+  note_url TEXT,
+  note_updated_at TEXT,
+  summary TEXT,
+  sentiment INTEGER,                        -- -2 (went badly) to 2 (went very well)
+  sentiment_reason TEXT,
+  digest_status TEXT NOT NULL DEFAULT 'none', -- 'none' | 'queued' | 'running' | 'done' | 'error'
+  digest_error TEXT,
+  digested_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_meetings_company ON meetings(company_id, starts_at);
+CREATE INDEX IF NOT EXISTS idx_meetings_starts ON meetings(starts_at);
+CREATE INDEX IF NOT EXISTS idx_meetings_link ON meetings(link_status, starts_at);
+CREATE INDEX IF NOT EXISTS idx_meetings_digest ON meetings(digest_status, updated_at);
+
+-- Something to do for an account: typed by a person, or promised in a call
+-- (meeting_id, with the words it came from in `quote`). owed_by says whose
+-- promise it is: 'us' (we owe it) or 'them' (we're waiting on them). A task the
+-- AI took from a call (created_by 'ai') follows its call's company, as insights do.
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  company_id TEXT REFERENCES companies(id) ON DELETE CASCADE,
+  contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+  deal_id TEXT REFERENCES deals(id) ON DELETE SET NULL,
+  meeting_id TEXT REFERENCES meetings(id) ON DELETE SET NULL,
+  owed_by TEXT NOT NULL DEFAULT 'us',       -- 'us' | 'them'
+  due_date TEXT,                            -- YYYY-MM-DD
+  done_at TEXT,                             -- NULL = open
+  quote TEXT,
+  created_by TEXT,                          -- 'ai' (follows its call), or the person who created or moved it
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_company ON tasks(company_id, done_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_open ON tasks(done_at, due_date);
+
+-- What a call said about an account beyond tasks: an idea or use case worth
+-- proposing, room to expand (upsell), or a risk. Open until someone acts on it.
+-- It belongs to its call's company: company_id follows meetings.company_id, and
+-- is NULL while the call is linked to no company.
+CREATE TABLE IF NOT EXISTS insights (
+  id TEXT PRIMARY KEY,
+  company_id TEXT REFERENCES companies(id) ON DELETE CASCADE,
+  meeting_id TEXT REFERENCES meetings(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,                       -- 'idea' | 'expansion' | 'risk'
+  text TEXT NOT NULL,
+  quote TEXT,
+  status TEXT NOT NULL DEFAULT 'open',      -- 'open' | 'done' | 'dismissed'
+  deal_id TEXT REFERENCES deals(id) ON DELETE SET NULL, -- the deal an expansion became
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_insights_company ON insights(company_id, status);

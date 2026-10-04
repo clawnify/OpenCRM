@@ -30,6 +30,12 @@ import {
   AI_ENTITIES, FILL_LIMIT, FillError, eligibleFields, fieldSpec, listColumns, getColumn, saveColumn, removeColumn,
   openCells, queueFill, queueCell, runQueued, scheduleRun as scheduleAiRun,
 } from "./ai-columns.js";
+import {
+  syncSettings, saveSettings, runMeetings, scheduleRun as scheduleMeetingsRun, ensureScheduled as ensureMeetingsScheduled,
+  cancelScheduled as cancelMeetingsScheduled, listMeetings, getMeeting, linkMeeting, retryDigest, counts as meetingCounts,
+  HISTORY_DAYS, LIVE_INTERVAL_MS as MEETINGS_INTERVAL_MS, type MeetingSync,
+} from "./meetings.js";
+import { customersOverview } from "./customers.js";
 import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, countSQL, countOf, type ManyLink } from "./relations.js";
 
 // In production Clawnify injects the CREDENTIALS broker binding + CLAWNIFY_ORG_ID
@@ -58,6 +64,13 @@ function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+/** A real calendar day written as YYYY-MM-DD. */
+function isDay(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const t = Date.parse(`${v}T00:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === v;
 }
 
 /** withRelations for a single record read (list reads call it directly). */
@@ -210,6 +223,7 @@ const CompanySchema = z.object({
   phone: z.string(),
   email: z.string(),
   notes: z.string(),
+  customer_since: z.string().nullable().optional().openapi({ description: "The day they became a customer (YYYY-MM-DD); null = not a customer. Set from the close date of their first won deal" }),
   contact_count: z.number().int().optional(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -520,6 +534,7 @@ const getStats = createRoute({
         companies: z.number().int(),
         deals: z.number().int(),
         dealValue: z.number(),
+        customers: z.number().int().openapi({ description: "Companies that are customers (customer_since set)" }),
       }) } },
     },
     500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
@@ -532,11 +547,14 @@ app.openapi(getStats, async (c) => {
     const companies = await get<{ count: number }>("SELECT COUNT(*) as count FROM companies");
     const deals = await get<{ count: number }>("SELECT COUNT(*) as count FROM deals");
     const dealValue = await get<{ total: number }>("SELECT COALESCE(SUM(value), 0) as total FROM deals WHERE stage NOT IN (SELECT key FROM stages WHERE is_lost = 1)");
+    await backfillCustomers();
+    const customers = await get<{ count: number }>("SELECT COUNT(*) as count FROM companies WHERE customer_since IS NOT NULL AND TRIM(customer_since) != ''");
     return c.json({
       contacts: contacts?.count || 0,
       companies: companies?.count || 0,
       deals: deals?.count || 0,
       dealValue: dealValue?.total || 0,
+      customers: customers?.count || 0,
     }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
@@ -787,6 +805,7 @@ const updateCompany = createRoute({
         phone: z.string().optional(),
         email: z.string().optional(),
         notes: z.string().optional(),
+        customer_since: z.string().nullable().optional().openapi({ description: "YYYY-MM-DD makes the company a customer from that day; null or \"\" makes it not a customer" }),
         custom: CustomValues,
       }).passthrough() } },
     },
@@ -821,6 +840,12 @@ app.openapi(updateCompany, async (c) => {
         fields.push(`${key} = ?`);
         params.push(typeof body[key] === "string" ? body[key].trim() : body[key]);
       }
+    }
+    if (body.customer_since !== undefined) {
+      const day = (body.customer_since ?? "").trim();
+      if (day && !isDay(day)) return c.json({ error: "customer_since must be a date as YYYY-MM-DD" }, 400);
+      fields.push("customer_since = ?");
+      params.push(day || null);
     }
 
     const hasCustom = Object.keys(customValues).length > 0;
@@ -1530,6 +1555,47 @@ async function backfillDealCompanies(): Promise<void> {
   dealCompaniesBackfilled = true;
 }
 
+let customersBackfilled = false; // per-isolate fast path
+
+/** The day a won deal makes its company a customer: its close date, never later than today (a close date is often the planned one), or today when it has none. */
+function wonDay(closeDate: unknown): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const close = typeof closeDate === "string" ? closeDate.trim() : "";
+  return isDay(close) && close < today ? close : today;
+}
+
+/** A company is a customer from the day its first deal closed won. A date already there (set by a person, or by an earlier win) stays. */
+async function markCustomer(companyId: string, day: string): Promise<void> {
+  await run(
+    "UPDATE companies SET customer_since = ?, updated_at = datetime('now') WHERE id = ? AND (customer_since IS NULL OR TRIM(customer_since) = '')",
+    [day, companyId],
+  );
+}
+
+/**
+ * Deals won before customer_since existed: their companies become customers
+ * from the first one's close date (or the day it was last changed, when it has
+ * none), never later than today, once per database. Like backfillDealCompanies, the marker is what stops
+ * a later run from refilling a date someone cleared on purpose.
+ */
+async function backfillCustomers(): Promise<void> {
+  if (customersBackfilled) return;
+  const done = await get("SELECT key FROM data_backfills WHERE key = 'companies.customer_since'");
+  if (!done) {
+    await backfillDealCompanies();
+    await run(
+      `UPDATE companies SET customer_since = min((
+          SELECT MIN(CASE WHEN d.close_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN d.close_date ELSE date(d.updated_at) END)
+            FROM deals d JOIN stages s ON s.key = d.stage AND s.is_won = 1
+           WHERE d.company_id = companies.id), date('now'))
+        WHERE (customer_since IS NULL OR TRIM(customer_since) = '')
+          AND EXISTS (SELECT 1 FROM deals d JOIN stages s ON s.key = d.stage AND s.is_won = 1 WHERE d.company_id = companies.id)`,
+    );
+    await run("INSERT OR IGNORE INTO data_backfills (key) VALUES ('companies.customer_since')");
+  }
+  customersBackfilled = true;
+}
+
 const getDealsBoard = createRoute({
   method: "get",
   path: "/api/deals/board",
@@ -1711,6 +1777,7 @@ app.openapi(createDeal, async (c) => {
     );
 
     await applyCustomValues("deal", "deals", id, customValues);
+    if (companyId && (await getStageRow(stageKey))?.is_won) await markCustomer(companyId, wonDay(body.close_date));
 
     const inserted = await get(DEAL_SELECT + " WHERE d.id = ?", [id]);
     return c.json({ deal: await withRelationsOne("deal", inserted) }, 201);
@@ -1824,6 +1891,8 @@ app.openapi(updateDeal, async (c) => {
       if (st?.is_won) {
         const value = Number(updated.value) || 0;
         await logActivity("deal", id, "stage_change", `Deal won — ${st.label}`, { stage: body.stage, value });
+        // Their first won deal makes the company a customer (the Customers page), from its close date.
+        if (updated.company_id) await markCustomer(String(updated.company_id), wonDay(updated.close_date));
         const channel = c.env.SLACK_CHANNEL?.trim();
         if (channel) {
           const contact = [updated.contact_first_name, updated.contact_last_name].filter(Boolean).join(" ");
@@ -1922,7 +1991,7 @@ app.get("/api/integrations/status", async (c) => {
   try {
     return c.json({ ...(await connectionStatus(c.env)), mailbox }, 200);
   } catch {
-    return c.json({ email: false, meeting: false, slack: false, mailbox }, 200);
+    return c.json({ email: false, meeting: false, slack: false, notes: false, mailbox }, 200);
   }
 });
 
@@ -2320,6 +2389,585 @@ app.get("/api/emails/:mailbox/:id", async (c) => {
     const result = await openEmail(c.env, decodeURIComponent(c.req.param("mailbox")).toLowerCase(), c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, result.status);
     return c.json(result, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// ── Meetings, tasks, insights, customers ───────────────────────────
+//
+// The calendar and Granola read into the CRM (meetings.ts), what calls produce
+// (tasks and insights), and how each customer is doing (customers.ts). Turning
+// the sync on and what it reads are a signed-in person's decisions, as for
+// email; people, agents and other apps read everything and work the tasks.
+
+const mayWrite = (c: Parameters<typeof caller>[0]) => ["user", "api", "agent"].includes(caller(c) ?? "");
+
+function meetingSyncView(s: MeetingSync | null) {
+  if (!s) return null;
+  return {
+    enabled: !!s.enabled,
+    history_days: s.history_days,
+    about: s.about,
+    calendar_owner: s.calendar_owner,
+    phase: s.phase,
+    calendar_synced_at: s.calendar_synced_at,
+    last_run_at: s.last_run_at,
+    last_error: s.last_error,
+    next_run_at: s.next_run_at,
+    updated_by: s.updated_by,
+    updated_at: s.updated_at,
+  };
+}
+
+// Which sources are connected, the settings, and where the sync is. Also the
+// watchdog: sync that is on with no run booked gets one.
+app.get("/api/meetings/sync", async (c) => {
+  try {
+    const [status, s] = await Promise.all([connectionStatus(c.env), syncSettings()]);
+    if (s?.enabled) await ensureMeetingsScheduled(c.env, new URL(c.req.url).origin, s);
+    return c.json({
+      sources: { calendar: status.meeting, notes: status.notes },
+      settings: meetingSyncView(s),
+      counts: await meetingCounts(),
+      history_choices: HISTORY_DAYS,
+      can_configure: mayConfigure(c),
+    }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// Turn the sync on or off, how far back it reads, and what we sell (it frames
+// the ideas and expansion the AI notes). Off stops reading; what is in the CRM stays.
+app.put("/api/meetings/sync", async (c) => {
+  try {
+    if (!mayConfigure(c)) return c.json({ error: "Only a signed-in person can change meeting sync settings." }, 403);
+    const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+    if (body.enabled !== undefined && typeof body.enabled !== "boolean") return c.json({ error: "enabled must be true or false" }, 400);
+    if (body.history_days !== undefined && !HISTORY_DAYS.includes(body.history_days as number)) return c.json({ error: `history_days must be one of ${HISTORY_DAYS.join(", ")}` }, 400);
+    if (body.about !== undefined && (typeof body.about !== "string" || body.about.length > 1000)) return c.json({ error: "about must be text under 1,000 characters" }, 400);
+    if (body.enabled === true && !(await connectionStatus(c.env)).meeting) return c.json({ error: "Connect Google Calendar in Clawnify first." }, 409);
+    const who = user(c)?.email ?? user(c)?.id ?? null;
+    const { before, after } = await saveSettings({
+      enabled: body.enabled as boolean | undefined,
+      history_days: body.history_days as number | undefined,
+      about: typeof body.about === "string" ? body.about.trim() : undefined,
+    }, who);
+    if (!after.enabled && before?.enabled) await cancelMeetingsScheduled(c.env, after);
+    if (after.enabled && (!before?.enabled || after.phase === "importing")) await scheduleMeetingsRun(c.env, new URL(c.req.url).origin, new Date());
+    return c.json({ settings: meetingSyncView(await syncSettings()), counts: await meetingCounts() }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// One bounded run, then book the next: at once while work is left, otherwise in MEETINGS_INTERVAL_MS.
+async function meetingsRunAndBook(env: Env["Bindings"], origin: string, sync: boolean): Promise<Record<string, unknown>> {
+  const result = await runMeetings(env, new Date(), { sync });
+  if (result.status !== "busy" && result.status !== "off") {
+    const delay = result.status === "error" ? 10 * 60_000 : result.more ? 0 : MEETINGS_INTERVAL_MS;
+    await scheduleMeetingsRun(env, origin, new Date(Date.now() + delay));
+  }
+  return { ...result, settings: meetingSyncView(await syncSettings()), counts: await meetingCounts() };
+}
+
+// The platform queue's target: a signed delivery on a declared public route
+// (see /api/email-sync/run for why people use the route below instead).
+app.post("/api/meetings/run", async (c) => {
+  const raw = await c.req.text();
+  const signed = await verifyDelivery(raw, {
+    signature: c.req.header("X-Queue-Signature") ?? null,
+    timestamp: c.req.header("X-Queue-Timestamp") ?? null,
+    keyId: c.req.header("X-Queue-Key-Id") ?? null,
+  }).catch(() => false);
+  if (!signed && !mayWrite(c)) return c.json({ error: "Sign in to run a sync." }, 403);
+  try {
+    return c.json(await meetingsRunAndBook(c.env, new URL(c.req.url).origin, false), 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// "Sync now", for a person or an agent: reads the calendar and Granola even when no read is due.
+app.post("/api/meetings/sync-now", async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to run a sync." }, 403);
+  try {
+    return c.json(await meetingsRunAndBook(c.env, new URL(c.req.url).origin, true), 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+const PersonSchema = z.object({ email: z.string(), name: z.string().nullable() });
+const MeetingSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  starts_at: z.string(),
+  ends_at: z.string().nullable(),
+  attendees: z.array(PersonSchema).openapi({ description: "The people from outside the team" }),
+  company_id: z.string().nullable(),
+  company_name: z.string().nullable(),
+  company_domain: z.string().nullable(),
+  link_status: z.enum(["auto", "manual", "unmatched", "ignored"]).openapi({ description: "auto = linked by its attendees; manual = linked by a person; unmatched = waiting for a person; ignored = not an account meeting" }),
+  calendar_url: z.string().nullable(),
+  note_url: z.string().nullable().openapi({ description: "The Granola note, where the transcript is" }),
+  has_note: z.boolean(),
+  summary: z.string().nullable(),
+  sentiment: z.number().int().nullable().openapi({ description: "How the call went, -2 (badly) to 2 (very well)" }),
+  sentiment_reason: z.string().nullable(),
+  digest_status: z.enum(["none", "queued", "running", "done", "error"]),
+  digest_error: z.string().nullable(),
+}).openapi("Meeting");
+
+const listMeetingsRoute = createRoute({
+  method: "get",
+  path: "/api/meetings",
+  tags: ["Meetings"],
+  summary: "List meetings with people from outside (calendar + Granola), newest first",
+  request: {
+    query: z.object({
+      company_id: z.string().optional().openapi({ description: "One company's meetings" }),
+      link: z.enum(["unmatched", "ignored"]).optional().openapi({ description: "unmatched: meetings waiting to be linked to a company" }),
+      when: z.enum(["upcoming", "past"]).optional().openapi({ description: "upcoming lists soonest first" }),
+      limit: z.string().optional().openapi({ description: "Default 25, max 100" }),
+      offset: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: { description: "Meetings", content: { "application/json": { schema: z.object({ meetings: z.array(MeetingSchema), total: z.number().int() }) } } },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(listMeetingsRoute, async (c) => {
+  try {
+    const q = c.req.valid("query");
+    return c.json(await listMeetings({
+      company_id: q.company_id || undefined,
+      link: q.link,
+      when: q.when,
+      limit: q.limit ? parseInt(q.limit, 10) || 25 : 25,
+      offset: q.offset ? parseInt(q.offset, 10) || 0 : 0,
+    }), 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+const getMeetingRoute = createRoute({
+  method: "get",
+  path: "/api/meetings/{id}",
+  tags: ["Meetings"],
+  summary: "Get a meeting",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "The meeting", content: { "application/json": { schema: z.object({ meeting: MeetingSchema }) } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(getMeetingRoute, async (c) => {
+  const meeting = await getMeeting(c.req.valid("param").id);
+  if (!meeting) return c.json({ error: "Meeting not found" }, 404);
+  return c.json({ meeting }, 200);
+});
+
+const linkMeetingRoute = createRoute({
+  method: "patch",
+  path: "/api/meetings/{id}",
+  tags: ["Meetings"],
+  summary: "Link a meeting to a company, unlink it, or mark it as not an account meeting",
+  description: "Linking reads the call (when it has a Granola note) and links the other unmatched meetings with people from the same domain. A company with no domain takes the domain of the people met.",
+  request: {
+    params: IdParam,
+    body: { required: true, content: { "application/json": { schema: z.object({
+      company_id: z.string().nullable().optional().openapi({ description: "The company; null unlinks" }),
+      ignored: z.boolean().optional().openapi({ description: "true: not an account meeting (hidden from the unmatched list)" }),
+    }) } } },
+  },
+  responses: {
+    200: { description: "The meeting", content: { "application/json": { schema: z.object({ meeting: MeetingSchema }) } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorSchema } } },
+    403: { description: "Not allowed", content: { "application/json": { schema: ErrorSchema } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(linkMeetingRoute, async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to change meetings." }, 403);
+  const { id } = c.req.valid("param");
+  const body = c.req.valid("json");
+  if (body.ignored === undefined && body.company_id === undefined) return c.json({ error: "Send company_id or ignored" }, 400);
+  if (body.company_id && !(await get("SELECT id FROM companies WHERE id = ?", [body.company_id]))) return c.json({ error: "Company not found" }, 400);
+  const meeting = await linkMeeting(id, body.ignored ? { ignored: true } : { company_id: body.company_id ?? null });
+  if (!meeting) return c.json({ error: "Meeting not found" }, 404);
+  if (meeting.digest_status === "queued") c.executionCtx.waitUntil(scheduleMeetingsRun(c.env, new URL(c.req.url).origin, new Date()));
+  return c.json({ meeting }, 200);
+});
+
+const retryDigestRoute = createRoute({
+  method: "post",
+  path: "/api/meetings/{id}/digest",
+  tags: ["Meetings"],
+  summary: "Read a call again after its digest failed",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "Queued", content: { "application/json": { schema: OkSchema } } },
+    403: { description: "Not allowed", content: { "application/json": { schema: ErrorSchema } } },
+    409: { description: "Nothing to read", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(retryDigestRoute, async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to change meetings." }, 403);
+  if (!(await retryDigest(c.req.valid("param").id))) return c.json({ error: "This meeting has no Granola note, no company, or was already read." }, 409);
+  c.executionCtx.waitUntil(scheduleMeetingsRun(c.env, new URL(c.req.url).origin, new Date()));
+  return c.json({ ok: true }, 200);
+});
+
+// ── Tasks ──
+
+const TaskSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  company_id: z.string().nullable(),
+  company_name: z.string().nullable(),
+  contact_id: z.string().nullable(),
+  deal_id: z.string().nullable(),
+  meeting_id: z.string().nullable().openapi({ description: "The call it was promised in" }),
+  meeting_title: z.string().nullable(),
+  meeting_starts_at: z.string().nullable(),
+  owed_by: z.enum(["us", "them"]).openapi({ description: "us = we promised it; them = we're waiting on them" }),
+  due_date: z.string().nullable().openapi({ description: "YYYY-MM-DD" }),
+  done: z.boolean(),
+  done_at: z.string().nullable(),
+  quote: z.string().nullable().openapi({ description: "The words in the call it came from" }),
+  created_by: z.string().nullable().openapi({ description: "ai while the task follows its call's company; otherwise the person who created it or moved it" }),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).openapi("Task");
+
+const TASK_SELECT = `SELECT t.*, co.name AS company_name, m.title AS meeting_title, m.starts_at AS meeting_starts_at
+  FROM tasks t LEFT JOIN companies co ON co.id = t.company_id LEFT JOIN meetings m ON m.id = t.meeting_id`;
+
+function taskView(r: Record<string, unknown>) {
+  return { ...r, owed_by: r.owed_by === "them" ? "them" : "us", done: !!r.done_at } as z.infer<typeof TaskSchema>;
+}
+
+const listTasksRoute = createRoute({
+  method: "get",
+  path: "/api/tasks",
+  tags: ["Tasks"],
+  summary: "List tasks: open ones by due date (undated last), done ones newest first",
+  request: {
+    query: z.object({
+      company_id: z.string().optional(),
+      status: z.enum(["open", "done", "all"]).optional().openapi({ description: "Default open" }),
+      owed_by: z.enum(["us", "them"]).optional(),
+      limit: z.string().optional().openapi({ description: "Default 50, max 200" }),
+    }),
+  },
+  responses: {
+    200: { description: "Tasks", content: { "application/json": { schema: z.object({ tasks: z.array(TaskSchema) }) } } },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(listTasksRoute, async (c) => {
+  try {
+    const q = c.req.valid("query");
+    const where: string[] = [];
+    const params: unknown[] = [];
+    const status = q.status ?? "open";
+    if (status === "open") where.push("t.done_at IS NULL");
+    if (status === "done") where.push("t.done_at IS NOT NULL");
+    if (q.company_id) { where.push("t.company_id = ?"); params.push(q.company_id); }
+    if (q.owed_by) { where.push("t.owed_by = ?"); params.push(q.owed_by); }
+    const limit = Math.min(200, Math.max(1, parseInt(q.limit || "50", 10) || 50));
+    const rows = await query<Record<string, unknown>>(
+      `${TASK_SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY t.done_at IS NOT NULL, CASE WHEN t.done_at IS NULL THEN COALESCE(t.due_date, '9999-12-31') END, t.done_at DESC, t.created_at DESC
+       LIMIT ?`,
+      [...params, limit],
+    );
+    return c.json({ tasks: rows.map(taskView) }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+const TaskWrite = {
+  title: z.string().optional(),
+  company_id: z.string().nullable().optional(),
+  contact_id: z.string().nullable().optional(),
+  deal_id: z.string().nullable().optional(),
+  owed_by: z.enum(["us", "them"]).optional(),
+  due_date: z.string().nullable().optional().openapi({ description: "YYYY-MM-DD, or null for none" }),
+};
+
+/** A task write's links and date, checked; the error to answer, or the values to store. */
+async function checkTaskWrite(body: { company_id?: string | null; contact_id?: string | null; deal_id?: string | null; due_date?: string | null }): Promise<string | null> {
+  if (body.due_date && !isDay(body.due_date)) return "due_date must be a date as YYYY-MM-DD";
+  if (body.company_id && !(await get("SELECT id FROM companies WHERE id = ?", [body.company_id]))) return "Company not found";
+  if (body.contact_id && !(await get("SELECT id FROM contacts WHERE id = ?", [body.contact_id]))) return "Contact not found";
+  if (body.deal_id && !(await get("SELECT id FROM deals WHERE id = ?", [body.deal_id]))) return "Deal not found";
+  return null;
+}
+
+const createTaskRoute = createRoute({
+  method: "post",
+  path: "/api/tasks",
+  tags: ["Tasks"],
+  summary: "Create a task",
+  request: { body: { required: true, content: { "application/json": { schema: z.object({ ...TaskWrite, title: z.string().min(1) }) } } } },
+  responses: {
+    201: { description: "Created task", content: { "application/json": { schema: z.object({ task: TaskSchema }) } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorSchema } } },
+    403: { description: "Not allowed", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(createTaskRoute, async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to add tasks." }, 403);
+  const body = c.req.valid("json");
+  const title = body.title.trim().slice(0, 300);
+  if (!title) return c.json({ error: "A task needs a title" }, 400);
+  const problem = await checkTaskWrite(body);
+  if (problem) return c.json({ error: problem }, 400);
+  const id = crypto.randomUUID();
+  await run(
+    "INSERT INTO tasks (id, title, company_id, contact_id, deal_id, owed_by, due_date, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, title, body.company_id ?? null, body.contact_id ?? null, body.deal_id ?? null, body.owed_by ?? "us", body.due_date || null, user(c)?.email ?? caller(c) ?? null],
+  );
+  return c.json({ task: taskView((await get<Record<string, unknown>>(`${TASK_SELECT} WHERE t.id = ?`, [id]))!) }, 201);
+});
+
+const updateTaskRoute = createRoute({
+  method: "put",
+  path: "/api/tasks/{id}",
+  tags: ["Tasks"],
+  summary: "Update a task, or mark it done (done: true) or open again (done: false)",
+  request: { params: IdParam, body: { required: true, content: { "application/json": { schema: z.object({ ...TaskWrite, done: z.boolean().optional() }) } } } },
+  responses: {
+    200: { description: "Updated task", content: { "application/json": { schema: z.object({ task: TaskSchema }) } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorSchema } } },
+    403: { description: "Not allowed", content: { "application/json": { schema: ErrorSchema } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(updateTaskRoute, async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to change tasks." }, 403);
+  const { id } = c.req.valid("param");
+  const body = c.req.valid("json");
+  if (!(await get("SELECT id FROM tasks WHERE id = ?", [id]))) return c.json({ error: "Task not found" }, 404);
+  const problem = await checkTaskWrite(body);
+  if (problem) return c.json({ error: problem }, 400);
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (body.title !== undefined) {
+    const title = body.title.trim().slice(0, 300);
+    if (!title) return c.json({ error: "A task needs a title" }, 400);
+    sets.push("title = ?"); params.push(title);
+  }
+  for (const key of ["company_id", "contact_id", "deal_id", "owed_by"] as const) {
+    if (body[key] !== undefined) { sets.push(`${key} = ?`); params.push(body[key]); }
+  }
+  // A task moved to another company is the mover's: it no longer follows its call's company.
+  // Only a real move counts (SET reads the row as it was), so resending the same company changes nothing.
+  if (body.company_id !== undefined) {
+    sets.push("created_by = CASE WHEN company_id IS NOT ? THEN ? ELSE created_by END");
+    params.push(body.company_id, user(c)?.email ?? caller(c) ?? null);
+  }
+  if (body.due_date !== undefined) { sets.push("due_date = ?"); params.push(body.due_date || null); }
+  if (body.done !== undefined) sets.push(body.done ? "done_at = COALESCE(done_at, datetime('now'))" : "done_at = NULL");
+  if (!sets.length) return c.json({ error: "No fields to update" }, 400);
+  await run(`UPDATE tasks SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ?`, [...params, id]);
+  return c.json({ task: taskView((await get<Record<string, unknown>>(`${TASK_SELECT} WHERE t.id = ?`, [id]))!) }, 200);
+});
+
+const deleteTaskRoute = createRoute({
+  method: "delete",
+  path: "/api/tasks/{id}",
+  tags: ["Tasks"],
+  summary: "Delete a task",
+  request: { params: IdParam },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } },
+    403: { description: "Not allowed", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(deleteTaskRoute, async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to change tasks." }, 403);
+  await run("DELETE FROM tasks WHERE id = ?", [c.req.valid("param").id]);
+  return c.json({ ok: true }, 200);
+});
+
+// ── Insights ──
+
+const InsightSchema = z.object({
+  id: z.string(),
+  company_id: z.string().nullable().openapi({ description: "The call's company; null while the call is linked to none" }),
+  company_name: z.string().nullable(),
+  meeting_id: z.string().nullable(),
+  meeting_title: z.string().nullable(),
+  meeting_starts_at: z.string().nullable(),
+  kind: z.enum(["idea", "expansion", "risk"]).openapi({ description: "idea = a use case worth proposing; expansion = room to grow the account; risk = a threat to the relationship" }),
+  text: z.string(),
+  quote: z.string().nullable(),
+  status: z.enum(["open", "done", "dismissed"]),
+  deal_id: z.string().nullable().openapi({ description: "The deal an expansion became" }),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).openapi("Insight");
+
+const INSIGHT_SELECT = `SELECT i.*, co.name AS company_name, m.title AS meeting_title, m.starts_at AS meeting_starts_at
+  FROM insights i LEFT JOIN companies co ON co.id = i.company_id LEFT JOIN meetings m ON m.id = i.meeting_id`;
+
+const listInsightsRoute = createRoute({
+  method: "get",
+  path: "/api/insights",
+  tags: ["Insights"],
+  summary: "List what calls said about accounts: ideas to propose, room to expand, risks. Newest first",
+  request: {
+    query: z.object({
+      company_id: z.string().optional(),
+      kind: z.enum(["idea", "expansion", "risk"]).optional(),
+      status: z.enum(["open", "done", "dismissed", "all"]).optional().openapi({ description: "Default open" }),
+      limit: z.string().optional().openapi({ description: "Default 50, max 200" }),
+    }),
+  },
+  responses: {
+    200: { description: "Insights", content: { "application/json": { schema: z.object({ insights: z.array(InsightSchema) }) } } },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(listInsightsRoute, async (c) => {
+  try {
+    const q = c.req.valid("query");
+    const where: string[] = [];
+    const params: unknown[] = [];
+    const status = q.status ?? "open";
+    if (status !== "all") { where.push("i.status = ?"); params.push(status); }
+    if (q.company_id) { where.push("i.company_id = ?"); params.push(q.company_id); }
+    if (q.kind) { where.push("i.kind = ?"); params.push(q.kind); }
+    const limit = Math.min(200, Math.max(1, parseInt(q.limit || "50", 10) || 50));
+    const rows = await query<z.infer<typeof InsightSchema>>(
+      `${INSIGHT_SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY COALESCE(m.starts_at, i.created_at) DESC LIMIT ?`,
+      [...params, limit],
+    );
+    return c.json({ insights: rows }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+const updateInsightRoute = createRoute({
+  method: "put",
+  path: "/api/insights/{id}",
+  tags: ["Insights"],
+  summary: "Mark an insight done or dismissed, or open it again",
+  request: { params: IdParam, body: { required: true, content: { "application/json": { schema: z.object({ status: z.enum(["open", "done", "dismissed"]) }) } } } },
+  responses: {
+    200: { description: "Updated insight", content: { "application/json": { schema: z.object({ insight: InsightSchema }) } } },
+    403: { description: "Not allowed", content: { "application/json": { schema: ErrorSchema } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(updateInsightRoute, async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to change insights." }, 403);
+  const { id } = c.req.valid("param");
+  await run("UPDATE insights SET status = ?, updated_at = datetime('now') WHERE id = ?", [c.req.valid("json").status, id]);
+  const insight = await get<z.infer<typeof InsightSchema>>(`${INSIGHT_SELECT} WHERE i.id = ?`, [id]);
+  if (!insight) return c.json({ error: "Insight not found" }, 404);
+  return c.json({ insight }, 200);
+});
+
+const insightDealRoute = createRoute({
+  method: "post",
+  path: "/api/insights/{id}/deal",
+  tags: ["Insights"],
+  summary: "Turn an expansion into a deal at the first stage of the pipeline",
+  request: { params: IdParam },
+  responses: {
+    201: { description: "The deal", content: { "application/json": { schema: z.object({ insight: InsightSchema, deal_id: z.string() }) } } },
+    403: { description: "Not allowed", content: { "application/json": { schema: ErrorSchema } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    409: { description: "Already a deal", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(insightDealRoute, async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to create deals." }, 403);
+  const { id } = c.req.valid("param");
+  const insight = await get<z.infer<typeof InsightSchema>>(`${INSIGHT_SELECT} WHERE i.id = ?`, [id]);
+  if (!insight) return c.json({ error: "Insight not found" }, 404);
+  if (insight.deal_id) return c.json({ error: "This is already a deal" }, 409);
+  if (!insight.company_id) return c.json({ error: "Link its call to a company first" }, 409);
+  await ensureStagesSeeded();
+  const first = await get<{ key: string }>("SELECT key FROM stages WHERE is_won = 0 AND is_lost = 0 ORDER BY position LIMIT 1");
+  const dealId = crypto.randomUUID();
+  await run(
+    "INSERT INTO deals (id, name, company_id, stage, notes) VALUES (?, ?, ?, ?, ?)",
+    [dealId, insight.text.slice(0, 120), insight.company_id, first?.key ?? "prospect", insight.quote ? `From a call: "${insight.quote}"` : ""],
+  );
+  await run("UPDATE insights SET deal_id = ?, status = 'done', updated_at = datetime('now') WHERE id = ?", [dealId, id]);
+  return c.json({ insight: (await get<z.infer<typeof InsightSchema>>(`${INSIGHT_SELECT} WHERE i.id = ?`, [id]))!, deal_id: dealId }, 201);
+});
+
+// ── Customers ──
+
+const CustomerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  domain: z.string(),
+  customer_since: z.string(),
+  status: z.enum(["red", "yellow", "green"]),
+  reasons: z.array(z.string()).openapi({ description: "Why the status, worst first. Empty when on track" }),
+  last_touch_at: z.string().nullable().openapi({ description: "The latest call or email" }),
+  days_quiet: z.number().int().nullable(),
+  last_meeting_at: z.string().nullable(),
+  next_meeting_at: z.string().nullable(),
+  last_summary: z.string().nullable(),
+  last_sentiment: z.number().int().nullable(),
+  ours_open: z.number().int(),
+  ours_overdue: z.number().int(),
+  theirs_open: z.number().int(),
+  ideas: z.number().int(),
+  expansion: z.number().int(),
+  risks: z.number().int(),
+}).openapi("Customer");
+
+const customersRoute = createRoute({
+  method: "get",
+  path: "/api/customers",
+  tags: ["Customers"],
+  summary: "How each customer is doing (worst first), what to do first, and calls with customers in the next 7 days",
+  description: "A customer is a company with customer_since set. Red: one of our promises is overdue, the last call went badly, a risk is open, or no contact in 45 days. Yellow: no contact in 21 days, waiting on them, the mood dropped, or no contact yet.",
+  request: { query: z.object({ tz: z.string().optional().openapi({ description: "Viewer's UTC offset in minutes (e.g. 120), for what counts as overdue today" }) }) },
+  responses: {
+    200: {
+      description: "Customers",
+      content: { "application/json": { schema: z.object({
+        customers: z.array(CustomerSchema),
+        focus: z.array(z.object({ kind: z.enum(["overdue", "reach_out", "due_today", "risk"]), company_id: z.string(), company_name: z.string(), text: z.string(), task_id: z.string().optional() })),
+        upcoming: z.array(z.object({ id: z.string(), title: z.string(), starts_at: z.string(), company_id: z.string(), company_name: z.string(), company_domain: z.string(), ours_open: z.number().int(), last_summary: z.string().nullable() })),
+        counts: z.object({ red: z.number().int(), yellow: z.number().int(), green: z.number().int() }),
+      }) } },
+    },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(customersRoute, async (c) => {
+  try {
+    await backfillCustomers();
+    const tz = Number(c.req.valid("query").tz ?? 0);
+    return c.json(await customersOverview(new Date(), Number.isFinite(tz) ? Math.max(-840, Math.min(840, tz)) : 0), 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }

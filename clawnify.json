@@ -10,7 +10,7 @@
     "framework": "react+hono",
     "database": true,
     "storage": false,
-    "credentials": ["gmail", "googlecalendar", "slack"]
+    "credentials": ["gmail", "googlecalendar", "slack", "granola"]
   },
 
   "env": {
@@ -20,7 +20,8 @@
   "api": {
     "public_routes": [
       { "path": "/api/email-sync/run", "methods": ["POST"] },
-      { "path": "/api/ai-columns/run", "methods": ["POST"] }
+      { "path": "/api/ai-columns/run", "methods": ["POST"] },
+      { "path": "/api/meetings/run", "methods": ["POST"] }
     ]
   },
 
