@@ -1557,9 +1557,11 @@ async function backfillDealCompanies(): Promise<void> {
 
 let customersBackfilled = false; // per-isolate fast path
 
-/** The day a won deal makes its company a customer: its close date, or today when it has none. */
+/** The day a won deal makes its company a customer: its close date, never later than today (a close date is often the planned one), or today when it has none. */
 function wonDay(closeDate: unknown): string {
-  return typeof closeDate === "string" && isDay(closeDate.trim()) ? closeDate.trim() : new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const close = typeof closeDate === "string" ? closeDate.trim() : "";
+  return isDay(close) && close < today ? close : today;
 }
 
 /** A company is a customer from the day its first deal closed won. A date already there (set by a person, or by an earlier win) stays. */
@@ -1573,7 +1575,7 @@ async function markCustomer(companyId: string, day: string): Promise<void> {
 /**
  * Deals won before customer_since existed: their companies become customers
  * from the first one's close date (or the day it was last changed, when it has
- * none), once per database. Like backfillDealCompanies, the marker is what stops
+ * none), never later than today, once per database. Like backfillDealCompanies, the marker is what stops
  * a later run from refilling a date someone cleared on purpose.
  */
 async function backfillCustomers(): Promise<void> {
@@ -1582,10 +1584,10 @@ async function backfillCustomers(): Promise<void> {
   if (!done) {
     await backfillDealCompanies();
     await run(
-      `UPDATE companies SET customer_since = (
+      `UPDATE companies SET customer_since = min((
           SELECT MIN(CASE WHEN d.close_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN d.close_date ELSE date(d.updated_at) END)
             FROM deals d JOIN stages s ON s.key = d.stage AND s.is_won = 1
-           WHERE d.company_id = companies.id)
+           WHERE d.company_id = companies.id), date('now'))
         WHERE (customer_since IS NULL OR TRIM(customer_since) = '')
           AND EXISTS (SELECT 1 FROM deals d JOIN stages s ON s.key = d.stage AND s.is_won = 1 WHERE d.company_id = companies.id)`,
     );
