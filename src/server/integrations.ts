@@ -90,18 +90,66 @@ export async function notesConnection(env: ConnectionsEnv): Promise<GenericClien
   return (await connectedServices(env)).has(SERVICES.notes) ? connect(SERVICES.notes, env) : null;
 }
 
-/** Send an email from the org's mailbox (Composio GMAIL_SEND_EMAIL). */
+/** Who an email goes to. `to` holds at least one address. */
+export interface Recipients {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+}
+
+async function mail(env: ConnectionsEnv): Promise<GoogleConnection> {
+  const m = await mailConnection(env);
+  if (!m) throw new Error("Connect Gmail in Clawnify first.");
+  return m;
+}
+
+/** Composio takes the first "To" alone and the rest as extra_recipients. */
+function addressing(r: Recipients) {
+  return {
+    recipient_email: r.to[0],
+    ...(r.to.length > 1 ? { extra_recipients: r.to.slice(1) } : {}),
+    ...(r.cc?.length ? { cc: r.cc } : {}),
+    ...(r.bcc?.length ? { bcc: r.bcc } : {}),
+  };
+}
+
+/** Send a new email from the org's mailbox (Composio GMAIL_SEND_EMAIL). */
 export async function sendEmail(
   env: ConnectionsEnv,
-  args: { to: string; subject: string; body: string; isHtml?: boolean },
+  args: Recipients & { subject: string; body: string; isHtml?: boolean },
 ): Promise<unknown> {
-  const mail = await mailConnection(env);
-  if (!mail) throw new Error("Connect Gmail in Clawnify first.");
-  return mail.run("SEND_EMAIL", {
-    recipient_email: args.to,
+  return (await mail(env)).run("SEND_EMAIL", {
+    ...addressing(args),
     subject: args.subject,
     body: args.body,
     is_html: args.isHtml ?? false,
+  });
+}
+
+/** Reply inside a Gmail thread, which keeps the thread's subject (GMAIL_REPLY_TO_THREAD). */
+export async function replyToThread(
+  env: ConnectionsEnv,
+  args: Recipients & { threadId: string; body: string; isHtml?: boolean },
+): Promise<unknown> {
+  return (await mail(env)).run("REPLY_TO_THREAD", {
+    ...addressing(args),
+    thread_id: args.threadId,
+    message_body: args.body,
+    is_html: args.isHtml ?? false,
+  });
+}
+
+/** Forward one Gmail message, with an optional note above it (GMAIL_FORWARD_MESSAGE). */
+export async function forwardMessage(
+  env: ConnectionsEnv,
+  args: Recipients & { messageId: string; note: string },
+): Promise<unknown> {
+  return (await mail(env)).run("FORWARD_MESSAGE", {
+    message_id: args.messageId,
+    recipients: args.to,
+    ...(args.cc?.length ? { cc: args.cc } : {}),
+    ...(args.bcc?.length ? { bcc: args.bcc } : {}),
+    ...(args.note ? { additional_text: args.note } : {}),
   });
 }
 

@@ -675,20 +675,63 @@ export async function importContactIfNeeded(env: ConnectionsEnv, contactId: stri
   );
 }
 
+/** One opened email: its text, read live from Gmail and never stored, and who it went between. */
+export interface OpenedEmail {
+  text: string;
+  subject: string;
+  sent_at: string;
+  direction: "sent" | "received";
+  thread_id: string;
+  from: Address | null;
+  to: Address[];
+  cc: Address[];
+}
+
 /** One email's text, read live from Gmail and never stored. Only at "everything". */
-export async function openEmail(env: ConnectionsEnv, mailbox: string, id: string): Promise<{ text: string } | { error: string; status: 403 | 404 | 409 }> {
+export async function openEmail(env: ConnectionsEnv, mailbox: string, id: string): Promise<OpenedEmail | { error: string; status: 403 | 404 | 409 }> {
   const a = await accountFor(mailbox);
   if (!a || !a.enabled) return { error: "Email sync is off for this mailbox", status: 404 };
   if (a.visibility !== "everything") return { error: "This mailbox shares metadata only; open the email in Gmail", status: 403 };
   const known = await get("SELECT 1 AS ok FROM email_message_contacts WHERE mailbox = ? AND message_id = ? LIMIT 1", [mailbox, id]);
   if (!known) return { error: "Email not found", status: 404 };
+  const row = await get<{ thread_id: string; sent_at: string; direction: "sent" | "received"; from_email: string; from_name: string | null; to_emails: string; subject: string | null }>(
+    "SELECT thread_id, sent_at, direction, from_email, from_name, to_emails, subject FROM email_messages WHERE mailbox = ? AND id = ?",
+    [mailbox, id],
+  );
+  if (!row) return { error: "Email not found", status: 404 };
   const mail = await mailConnection(env);
   if (!mail) return { error: "Gmail is not connected", status: 409 };
   const data = (await mail.run("FETCH_MESSAGE_BY_MESSAGE_ID", { message_id: id, format: "full", user_id: "me" })) as {
     messageText?: string;
     preview?: { body?: string };
+    payload?: { headers?: Array<{ name?: string; value?: string }> };
   } | null;
-  return { text: (data?.messageText || data?.preview?.body || "").trim() };
+  // Cc is only in the raw headers; the sync stores To but never Cc.
+  const header = (name: string) => data?.payload?.headers?.find((h) => h.name?.toLowerCase() === name)?.value;
+  const storedTo = jsonArray(row.to_emails).filter((e): e is string => typeof e === "string").map((email) => ({ email, name: null }));
+  const to = parseAddresses(header("to"));
+  return {
+    text: (data?.messageText || data?.preview?.body || "").trim(),
+    subject: row.subject ?? "",
+    sent_at: row.sent_at,
+    direction: row.direction,
+    thread_id: row.thread_id,
+    from: row.from_email ? { email: row.from_email, name: row.from_name } : null,
+    to: to.length ? to : storedTo,
+    cc: parseAddresses(header("cc")),
+  };
+}
+
+/** A synced email the CRM may reply to or forward: one it has linked to a contact, in an enabled mailbox. */
+export async function knownEmail(mailbox: string, id: string): Promise<{ thread_id: string; subject: string | null; visibility: Visibility } | null> {
+  return (await get<{ thread_id: string; subject: string | null; visibility: Visibility }>(
+    `SELECT m.thread_id, m.subject, a.visibility
+       FROM email_messages m
+       JOIN email_accounts a ON a.mailbox = m.mailbox AND a.enabled = 1
+      WHERE m.mailbox = ? AND m.id = ?
+        AND EXISTS (SELECT 1 FROM email_message_contacts l WHERE l.mailbox = m.mailbox AND l.message_id = m.id)`,
+    [mailbox, id],
+  )) ?? null;
 }
 
 export async function counts(mailbox: string): Promise<{ emails: number; contacts: number }> {

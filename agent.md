@@ -45,12 +45,18 @@ Every contact/company/deal has a timeline. Integrations and notes write to it.
 ## Integrations (Clawnify connections)
 
 These use the org's Clawnify connections — no keys live in this app. Check what's
-wired first: `GET /api/integrations/status` → `{ email, meeting, slack, notes }`
-(`notes` is Granola).
+wired first: `GET /api/integrations/status` → `{ email, meeting, slack, notes, mailbox }` (`notes`:
+Granola; `mailbox`: the address email goes out from, once email sync is set up).
 
-- **Email a contact** — `POST /api/integrations/email` `{ contact_id, subject, body }`.
-  Sends from the org's Gmail connection (`gmail`), or its Google Workspace one
-  (`googlesuper`) when Gmail isn't connected, and logs it on the contact.
+- **Send an email** — `POST /api/integrations/email`
+  `{ to: [addresses], cc?, bcc?, subject, body }`, or `{ contact_id, subject, body }`
+  to email one contact. Sends from the org's Gmail connection (`gmail`), or its
+  Google Workspace one (`googlesuper`) when Gmail isn't connected, and logs it on
+  every recipient who is a contact. At most 50 recipients.
+  - **Reply** inside a synced thread: add `reply_to: { mailbox, id }` (an email from
+    `GET /api/contacts/{id}/emails`). The thread keeps its subject; `body` is required.
+  - **Forward** a synced email: add `forward: { mailbox, id }`; `body` is an optional
+    note above it. Only when the mailbox shares everything; 403 otherwise.
 - **Schedule a meeting** — `POST /api/integrations/meeting`
   `{ contact_id, summary, start_datetime, timezone, duration_minutes }`.
   Creates a Google Calendar event (`googlecalendar`, or `googlesuper` when Calendar
@@ -72,8 +78,9 @@ a contact, the CRM keeps who wrote to whom and when. Email bodies stay in Gmail.
   `{ emails, total, sync_on }`. Each email has `direction` (`sent`/`received`),
   `from_email`, `to_emails`, `sent_at`, and `subject` only when the mailbox's
   visibility shares subjects (otherwise `null`).
-- `GET /api/emails/{mailbox}/{id}`: one email's text, read live from Gmail. Only
-  when the mailbox shares everything (`can_open: true` on the email); 403 otherwise.
+- `GET /api/emails/{mailbox}/{id}`: one email's text, read live from Gmail, with
+  `subject`, `from`, `to` and `cc` (for Reply all). Only when the mailbox shares
+  everything (`can_open: true` on the email); 403 otherwise.
 - Contacts carry `last_contacted_at` (read-only), so "who haven't we emailed in a
   month" is a filter on the contacts list: `last_contacted_at` `before` a date.
 - `GET /api/email-sync` shows the settings and progress; `POST /api/email-sync/sync-now`

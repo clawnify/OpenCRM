@@ -205,6 +205,25 @@ export interface ConnectionStatus {
   slack: boolean;
   /** Granola: call notes and transcripts. */
   notes: boolean;
+  /** The address email goes out from, once email sync is set up. */
+  mailbox?: string | null;
+}
+
+export interface EmailAddress {
+  email: string;
+  name: string | null;
+}
+
+/** An email opened from the timeline: its text (read live from Gmail) and who it went between. */
+export interface OpenedEmail {
+  text: string;
+  subject: string;
+  sent_at: string;
+  direction: "sent" | "received";
+  thread_id: string;
+  from: EmailAddress | null;
+  to: EmailAddress[];
+  cc: EmailAddress[];
 }
 
 // Entities that support bulk spreadsheet import.

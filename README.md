@@ -198,7 +198,8 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 | GET | `/api/values?entity=&field=` | The values a column already holds (case-insensitive, up to 200), for a picker that offers them |
 | GET | `/api/contacts/aggregates`, `/api/companies/aggregates` | Column totals over the filtered list (`ops=[{key, op}]` plus the list's `search`/`filters`) |
 | GET | `/api/contacts/:id/emails` | A contact's synced emails, newest first; the subject only if the mailbox shares subjects |
-| GET | `/api/emails/:mailbox/:id` | One email's text, read live from Gmail; only when the mailbox shares everything |
+| GET | `/api/emails/:mailbox/:id` | One email's text (read live from Gmail), subject, from, to and cc; only when the mailbox shares everything |
+| POST | `/api/integrations/email` | Send from the connected Gmail: `{ to, cc?, bcc?, subject, body }`, a reply (`reply_to: { mailbox, id }`) or a forward (`forward: { mailbox, id }`) |
 | GET | `/api/email-sync` | Gmail sync settings and progress (`?check=1` also asks which account the connection signs in as) |
 | PUT | `/api/email-sync` | Change sync settings, or turn sync on or off (signed-in people only; turning off deletes what was synced) |
 | GET | `/api/email-sync/labels` | The mailbox's own Gmail labels, for importing only some |

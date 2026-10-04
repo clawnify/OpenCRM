@@ -3,6 +3,7 @@ import { Maximize2, Plus, Sparkles, X } from "lucide-react";
 import { openChat, useChatContext, useHasChat } from "@clawnify/app/client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useComposerAvoid } from "@/components/email/composer";
 
 type Icon = ComponentType<{ className?: string }>;
 
@@ -49,8 +50,10 @@ export function RecordTopBar({ onClose, crumb }: { onClose: () => void; crumb: s
  * in view. Full screen on a phone, where there is no room beside anything.
  */
 export function RecordPanel({ label, children }: { label: string; children: ReactNode }) {
+  // The docked email composer sits left of the panel, so it never covers the record.
+  const avoid = useComposerAvoid();
   return (
-    <aside aria-label={label} className="fixed inset-0 z-40 flex flex-col bg-background md:static md:z-auto md:w-[26rem] md:shrink-0 md:border-l md:border-border">
+    <aside ref={avoid} aria-label={label} className="fixed inset-0 z-40 flex flex-col bg-background md:static md:z-auto md:w-[26rem] md:shrink-0 md:border-l md:border-border">
       {children}
     </aside>
   );

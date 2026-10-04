@@ -244,10 +244,6 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
 
   // ── Integrations & timeline ──
 
-  const emailContact = useCallback(async (contactId: string, subject: string, body: string) => {
-    await api("POST", "/api/integrations/email", { contact_id: contactId, subject, body });
-  }, []);
-
   const scheduleMeeting = useCallback(async (
     contactId: string,
     data: { summary: string; start_datetime: string; timezone: string; duration_minutes: number },
@@ -291,7 +287,7 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     addCompany, updateCompany, deleteCompanies,
     deals, dealsPag, dealsTotalValue, setDealsPage: dSet.setPage, setDealsSort: dSet.setSort, setDealsSearch: dSet.setSearch,
     addDeal, fetchDeal, updateDeal, deleteDeal, boardDeals, boardFilters, setBoardFilters,
-    connections, emailContact, scheduleMeeting,
+    connections, scheduleMeeting,
     fetchActivities, addNote, importEntity,
     customFields, refetchCustomFields,
     changes, recordsChanged,

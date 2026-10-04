@@ -11,12 +11,13 @@ import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, As
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { RecordChip, RelationInput } from "@/lib/relations";
 import { ContactEmails } from "@/components/contacts/contact-emails";
+import { useComposer } from "@/components/email/composer";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { Contact, Activity, RelationRecord } from "@/types";
 
-type FormKind = "email" | "meeting" | "note";
+type FormKind = "meeting" | "note";
 
 const ACTIVITY_STYLE: Record<string, { icon: typeof Mail; className: string }> = {
   email: { icon: Mail, className: "bg-primary/10 text-primary" },
@@ -49,7 +50,8 @@ function formatTimestamp(createdAt: string): string {
 // `panel` is the same record in the side panel beside the contacts list: one
 // column, no tab strip, and no highlight tiles repeating the details above them.
 export function ContactDetail({ id, navigate, panel = false }: { id: string; navigate: (to: string) => void; panel?: boolean }) {
-  const { fetchContact, fetchActivities, updateContact, emailContact, scheduleMeeting, addNote, connections, setError, customFields, changes } = useCrm();
+  const { fetchContact, fetchActivities, updateContact, scheduleMeeting, addNote, connections, setError, customFields, changes } = useCrm();
+  const { compose } = useComposer();
   const relationDefs = customFields.filter((d) => d.entity_type === "contact" && d.field_type === "relation");
 
   const [contact, setContact] = useState<Contact | null | undefined>(undefined);
@@ -59,8 +61,6 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
   const [openForm, setOpenForm] = useState<FormKind | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [subject, setSubject] = useState("");
-  const [emailBody, setEmailBody] = useState("");
   const [meetingTitle, setMeetingTitle] = useState("");
   const [meetingStart, setMeetingStart] = useState("");
   const [meetingDuration, setMeetingDuration] = useState("30");
@@ -86,6 +86,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
     if (seen.current === changes) return;
     seen.current = changes;
     void reload();
+    void fetchActivities("contact", id).then(setActivities);
   }, [changes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -126,6 +127,8 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
     ? { id: contact.company_id, label: contact.company_name, domain: contact.company_domain ?? null }
     : undefined;
   const fullName = `${contact.first_name} ${contact.last_name}`.trim() || "Contact";
+  const composeToContact = () =>
+    compose({ to: contact.email ? [{ email: contact.email.toLowerCase(), name: `${contact.first_name} ${contact.last_name}`.trim() || null }] : [] });
 
   const openFormKind = (kind: FormKind) => {
     if (openForm === kind) {
@@ -133,10 +136,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
       return;
     }
     setOpenForm(kind);
-    if (kind === "email") {
-      setSubject("");
-      setEmailBody("");
-    } else if (kind === "meeting") {
+    if (kind === "meeting") {
       setMeetingTitle(`Meeting with ${fullName}`);
       setMeetingStart("");
       setMeetingDuration("30");
@@ -148,19 +148,6 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
   const afterAction = async () => {
     setOpenForm(null);
     await reloadActivities();
-  };
-
-  const submitEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await emailContact(contact.id, subject, emailBody);
-      await afterAction();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send email");
-    } finally {
-      setBusy(false);
-    }
   };
 
   const submitMeeting = async (e: React.FormEvent) => {
@@ -224,7 +211,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
           </div>
 
           <div className="flex flex-wrap gap-2 px-4 pt-3 pb-4">
-            <Button variant="outline" size="sm" onClick={() => openFormKind("email")} disabled={!connections.email} title={connections.email ? undefined : "Connect Gmail in Clawnify"}>
+            <Button variant="outline" size="sm" onClick={composeToContact} disabled={!connections.email} title={connections.email ? undefined : "Connect Gmail in Clawnify"}>
               <Mail className="size-4" /> Compose email
             </Button>
             <Button variant="outline" size="sm" onClick={() => openFormKind("meeting")} disabled={!connections.meeting} title={connections.meeting ? undefined : "Connect Google Calendar in Clawnify"} aria-label="Schedule meeting">
@@ -236,13 +223,6 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
             <AskAi about={`${contact.first_name} ${contact.last_name}`.trim() || "this contact"} />
           </div>
 
-          {openForm === "email" && (
-            <form onSubmit={submitEmail} className="mx-4 mb-4 flex flex-col gap-3 rounded-md p-4 shadow-edge">
-              <div className="flex flex-col gap-1.5"><Label htmlFor="email-subject">Subject</Label><Input id="email-subject" required value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
-              <div className="flex flex-col gap-1.5"><Label htmlFor="email-body">Message</Label><Textarea id="email-body" required value={emailBody} onChange={(e) => setEmailBody(e.target.value)} /></div>
-              <div className="flex justify-end"><Button type="submit" size="sm" disabled={busy}>{busy ? "Sending…" : "Send email"}</Button></div>
-            </form>
-          )}
           {openForm === "meeting" && (
             <form onSubmit={submitMeeting} className="mx-4 mb-4 flex flex-col gap-3 rounded-md p-4 shadow-edge">
               <div className="flex flex-col gap-1.5"><Label htmlFor="meeting-title">Title</Label><Input id="meeting-title" required value={meetingTitle} onChange={(e) => setMeetingTitle(e.target.value)} /></div>
@@ -343,7 +323,7 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
               )}
             </section>
 
-            <ContactEmails contactId={contact.id} contactName={fullName} canCompose={connections.email} onCompose={() => openFormKind("email")} navigate={navigate} />
+            <ContactEmails contactId={contact.id} contactName={fullName} canCompose={connections.email} onCompose={composeToContact} navigate={navigate} />
             <FutureSection label="Notes" count={noteCount} onAdd={() => openFormKind("note")} />
             <FutureSection label="Tasks" count={0} />
           </div>
