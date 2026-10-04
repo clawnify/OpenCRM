@@ -180,19 +180,22 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
                     </div>
                   </div>
 
-                  {columnDeals.map((d) => (
-                    <DealCard
-                      key={d.id}
-                      deal={d}
-                      open={d.id === openId}
-                      isAgent={isAgent}
-                      stages={stages}
-                      onOpen={() => openRecord(d.id)}
-                      onMove={(to) => void moveDeal(d, to)}
-                      onEdit={() => openEdit(d)}
-                      onDelete={() => setDeleteTarget(d)}
-                    />
-                  ))}
+                  {/* The tray keeps its height; a long stage scrolls its own deals under a fixed header. */}
+                  <div className="-mx-3 -mb-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 pb-3">
+                    {columnDeals.map((d) => (
+                      <DealCard
+                        key={d.id}
+                        deal={d}
+                        open={d.id === openId}
+                        isAgent={isAgent}
+                        stages={stages}
+                        onOpen={() => openRecord(d.id)}
+                        onMove={(to) => void moveDeal(d, to)}
+                        onEdit={() => openEdit(d)}
+                        onDelete={() => setDeleteTarget(d)}
+                      />
+                    ))}
+                  </div>
                 </StageDrop>
               );
             })}
@@ -311,7 +314,7 @@ function NewDealButton({ onCreate, trigger }: { onCreate: (name: string) => Prom
 function StageDrop({ stage, children }: { stage: string; children: ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage });
   return (
-    <div ref={setNodeRef} className={cn("flex w-72 shrink-0 flex-col gap-2 rounded-xl bg-secondary p-3 transition-shadow", isOver && "ring-2 ring-inset ring-ring/15")}>
+    <div ref={setNodeRef} className={cn("flex min-h-0 w-72 shrink-0 flex-col gap-2 rounded-xl bg-secondary p-3 transition-shadow", isOver && "ring-2 ring-inset ring-ring/15")}>
       {children}
     </div>
   );
