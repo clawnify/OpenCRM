@@ -124,7 +124,7 @@ function ManySection({ def, inverseKey, row }: { def: CustomFieldDef; inverseKey
               <Plus className="size-3.5" />
             </button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-64">
+          <PopoverContent align="end" className="w-64 p-0">
             <RecordPicker entity={entity} selected={linked} creatable onPick={(r) => void link(r.id, linked.includes(r.id) ? null : row.id)} />
           </PopoverContent>
         </Popover>

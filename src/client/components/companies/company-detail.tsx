@@ -201,7 +201,7 @@ function IndustryField({ value, onSave }: { value: string; onSave: (v: string) =
           {value ? <CategoryBadge value={value} /> : <span className="text-faint">Set industry…</span>}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64">
+      <PopoverContent align="start" className="w-64 p-0">
         <ValuesMenu entity="company" field="industry" value={value || null} emptyLabel="No industry"
           onPick={(v) => { setOpen(false); void onSave(v ?? ""); }} />
       </PopoverContent>

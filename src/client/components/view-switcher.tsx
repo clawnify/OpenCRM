@@ -54,7 +54,7 @@ export function ViewSwitcher({ views, current, count, onOpen, onCreate, onRename
           <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64">
+      <PopoverContent align="start" className="w-64 p-0">
         {step === "list" && (
           <div className="flex flex-col">
             <ul className="flex flex-col p-1">
@@ -189,7 +189,7 @@ function RowMenu({ name, onRename, onExport, onDelete }: { name: string; onRenam
           <MoreVertical className="size-3.5" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" side="right" className="w-36">
+      <PopoverContent align="start" side="right" className="w-36 p-0">
         <Command>
           <CommandList>
             <CommandGroup>

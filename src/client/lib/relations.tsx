@@ -292,7 +292,7 @@ export function RelationInput({ entity, value, onChange, placeholder = "Selectâ€
   const name = useRecordNames(value && known?.id !== value ? [{ entity, id: value }] : []);
   const record = value ? (known?.id === value ? known : name(entity, value)) : null;
   const picker = (
-    <PopoverContent align="start" className="w-64">
+    <PopoverContent align="start" className="w-64 p-0">
       <RecordPicker
         entity={entity}
         selected={value ? [value] : []}

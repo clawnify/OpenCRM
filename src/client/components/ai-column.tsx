@@ -52,7 +52,7 @@ function AiHeaderControl({ ai, fieldKey, label, emptyIds, chips }: {
           </button>
         )}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-3" onClick={(e) => e.stopPropagation()}>
+      <PopoverContent align="end" className="w-80" onClick={(e) => e.stopPropagation()}>
         <AiColumnPanel ai={ai} fieldKey={fieldKey} label={label} emptyIds={emptyIds} chips={chips} onDone={() => setOpen(false)} />
       </PopoverContent>
     </Popover>

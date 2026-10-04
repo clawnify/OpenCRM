@@ -42,7 +42,7 @@ export function ExportButton({ selected, pageRows, total, onSelected, onAll }: {
   return (
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) setChoice("selected"); }}>
       <PopoverTrigger asChild>{button({})}</PopoverTrigger>
-      <PopoverContent align="end" className="w-60">
+      <PopoverContent align="end" className="w-60 p-0">
         <Command>
           <CommandList>
             <CommandGroup>
