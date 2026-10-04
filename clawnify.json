@@ -10,7 +10,8 @@
     "framework": "react+hono",
     "database": true,
     "storage": false,
-    "credentials": ["gmail", "googlecalendar", "slack", "granola"]
+    "credentials": ["gmail", "googlecalendar", "slack", "granola"],
+    "provides": ["contacts"]
   },
 
   "env": {
