@@ -13,8 +13,10 @@ export type Route =
   | { name: "company"; id: string }
   | { name: "deals"; record?: string }
   | { name: "deal"; id: string }
+  | { name: "customers" }
   | { name: "properties" }
   | { name: "email-sync" }
+  | { name: "meetings-sync" }
   | { name: "not-found" };
 
 function parse(pathname: string, search: string): Route {
@@ -31,8 +33,10 @@ function parse(pathname: string, search: string): Route {
   if (pathname === "/deals") return { name: "deals", record };
   const dm = pathname.match(/^\/deals\/([^/]+)$/);
   if (dm) return { name: "deal", id: decodeURIComponent(dm[1]) };
+  if (pathname === "/customers") return { name: "customers" };
   if (pathname === "/settings/properties") return { name: "properties" };
   if (pathname === "/settings/email") return { name: "email-sync" };
+  if (pathname === "/settings/meetings") return { name: "meetings-sync" };
   return { name: "not-found" };
 }
 

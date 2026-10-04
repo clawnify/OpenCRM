@@ -21,6 +21,7 @@ Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with
 - **Integrations (Clawnify connections)** — email a contact via Gmail, schedule a Google Calendar meeting, and post to Slack when a deal is won — all through the org's Clawnify connections, no keys in the app. A Google Workspace connection stands in for Gmail or Calendar when either isn't connected on its own
 - **AI columns**: hover a column (Industry, Title, your own attributes) and click the spark to have AI fill its empty cells from the rest of each record, with your instructions. Quote the company's domain in them and it reads that website too. It fills 20 rows at a time, so a wrong prompt costs little, and it never overwrites what someone typed. Calls go through Clawnify and are charged to the workspace's credits
 - **Gmail sync** (Settings → Email): see when you last emailed each contact and their emails on their page. You choose what it imports (all mail or some labels, and how far back), what the team sees (metadata, subjects, or everything), and whether people you email become contacts. Group and personal addresses and a blocklist are skipped. Bodies stay in Gmail: the CRM stores who wrote to whom and when, the subject only if you share it, and turning sync off deletes what it stored
+- **Meetings and customers** (Settings → Meetings): reads the workspace's Google Calendar and Granola call notes. Every meeting with people from outside lands on its company, linked by who was invited; the rest wait in a short list to link by hand. Each call with a Granola note is read once by AI for a summary, how it went, the tasks promised (ours and theirs, with due dates when one was said) and insights: ideas to propose, room to expand, risks. The Customers page shows every customer worst first with the reasons in plain words (an overdue promise, a call that went badly, no contact in weeks), the few things to do first, and this week's calls with notes from the last one. Transcripts stay in Granola
 - **CSV / XLSX import** — upload a spreadsheet, map columns to fields (exact-match auto-mapping), preview, import; company names resolve to existing companies or are created
 - **Deal pipeline** — a board tracking deals through stages (prospect → qualified → proposal → negotiation → won/lost) with per-column totals
 - **Path routing** — deep-linkable views and records: a row opens in a side panel beside the list (`/contacts?record=:id`), and expands to its full page (`/contacts/:id`)
@@ -150,12 +151,14 @@ erDiagram
 ```
 
 ```sql
-companies (id, name, domain, industry, phone, email, notes)
+companies (id, name, domain, industry, phone, email, notes, customer_since)
 contacts  (id, first_name, last_name, email, phone, company_id → companies, title, status)
 deals     (id, name, contact_id → contacts, company_id → companies, value, stage, close_date, notes)
 ```
 
 Contacts belong to companies. A deal has its own company and its own contact, both optional: a deal can name a company before it has a person. Setting a contact on a deal with no company gives the deal that contact's company. Deleting a company sets `company_id` to NULL on its contacts and deals. Deleting a contact sets `contact_id` to NULL on its deals.
+
+Meetings come from the calendar and Granola (`meetings`, one row per meeting with people from outside, linked to a company); a call's tasks (`tasks`, `owed_by` us or them) and insights (`insights`: idea, expansion or risk) point back at it. A company with `customer_since` set is a customer.
 
 Custom attributes are real columns, registered in `custom_field_defs`. A relation is two defs, one per side, pointing at each other (`inverse_def_id`). The single side (`many_to_one`) is an indexed column holding the linked record's id, its key ending in `_id`; the many side (`one_to_many`) has no column and is read back from it. Relation columns carry no foreign key, since SQLite can't drop a column that has one; the API clears links when a record is deleted.
 
@@ -206,6 +209,17 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 | POST | `/api/ai-columns/run` | Fill queued cells. Also the platform queue's target |
 | POST | `/api/email-sync/sync-now` | Run a sync now (signed-in people, API callers and agents) |
 | POST | `/api/email-sync/run` | The platform queue's target, which chains runs until the first import is done. A public route, so a browser's request reaches it without identity: people use `sync-now` |
+| GET / PUT | `/api/meetings/sync` | Meeting sync settings and progress; turn it on or off, how far back it reads, what you sell (signed-in people only for PUT) |
+| POST | `/api/meetings/sync-now` | Read the calendar and Granola now. `/api/meetings/run` is the platform queue's target (a public route, as for email) |
+| GET | `/api/meetings` | Meetings with people from outside (`company_id`, `when=upcoming\|past`, `link=unmatched`) |
+| GET / PATCH | `/api/meetings/:id` | One meeting; link it to a company (`{ company_id }`), unlink it, or `{ ignored: true }` |
+| POST | `/api/meetings/:id/digest` | Read a call again after it failed |
+| GET / POST | `/api/tasks` | Tasks (`company_id`, `status=open\|done\|all`, `owed_by=us\|them`); create one |
+| PUT / DELETE | `/api/tasks/:id` | Update a task, `{ done: true }` to complete it; delete it |
+| GET | `/api/insights` | Ideas, room to expand and risks from calls (`company_id`, `kind`, `status`) |
+| PUT | `/api/insights/:id` | Mark one done or dismissed |
+| POST | `/api/insights/:id/deal` | Turn an expansion into a deal |
+| GET | `/api/customers` | Every customer worst first with its reasons, what to do first, this week's calls |
 
 ## Community & Contributions
 

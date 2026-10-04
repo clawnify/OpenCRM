@@ -45,7 +45,8 @@ Every contact/company/deal has a timeline. Integrations and notes write to it.
 ## Integrations (Clawnify connections)
 
 These use the org's Clawnify connections — no keys live in this app. Check what's
-wired first: `GET /api/integrations/status` → `{ email, meeting, slack }`.
+wired first: `GET /api/integrations/status` → `{ email, meeting, slack, notes }`
+(`notes` is Granola).
 
 - **Email a contact** — `POST /api/integrations/email` `{ contact_id, subject, body }`.
   Sends from the org's Gmail connection (`gmail`), or its Google Workspace one
@@ -81,6 +82,38 @@ a contact, the CRM keeps who wrote to whom and when. Email bodies stay in Gmail.
 You can read synced emails and run a sync, but not change what a mailbox shares
 or turn sync on or off: that is a person's decision, made in Settings → Email.
 Don't work around a hidden subject by opening the email in the browser.
+
+## Meetings, tasks, insights and customers
+
+The org's calendar and Granola call notes can be synced (Settings → **Meetings**).
+Every meeting with people from outside is linked to its company (by the people
+invited), and each linked call with a Granola note is read once by the AI: a
+summary, how it went (`sentiment`, -2 to 2), tasks promised in it and insights.
+Transcripts stay in Granola. Meetings with only the team are never listed.
+
+- `GET /api/meetings?company_id=&when=upcoming|past&link=unmatched`: meetings,
+  newest first (upcoming: soonest first). `link=unmatched` lists the ones waiting
+  for a person to link. `PATCH /api/meetings/{id}` `{ company_id }` links one
+  (its other unmatched meetings from the same domain follow), `{ company_id: null }`
+  unlinks, `{ ignored: true }` marks it as not an account meeting.
+- `GET /api/tasks?company_id=&status=open|done|all&owed_by=us|them`: tasks, open
+  ones by due date. `owed_by: us` is something we promised; `them` is something
+  we're waiting on. `POST /api/tasks` `{ title, company_id?, due_date?, owed_by? }`,
+  `PUT /api/tasks/{id}` `{ done: true }` to complete one, `DELETE /api/tasks/{id}`.
+- `GET /api/insights?company_id=&kind=idea|expansion|risk`: what calls said beyond
+  tasks, each with the `quote` it came from. `PUT /api/insights/{id}`
+  `{ status: done|dismissed }`; `POST /api/insights/{id}/deal` turns an expansion
+  into a deal at the first stage.
+- `GET /api/customers`: every company with `customer_since` set, worst first,
+  each with `status` (red/yellow/green) and the `reasons` in plain words; `focus`
+  (the few things to do first) and `upcoming` (calls with customers this week).
+  A company becomes a customer with `PUT /api/companies/{id}` `{ customer_since: "YYYY-MM-DD" }`,
+  or when one of its deals reaches a won stage.
+
+To answer "how is <customer> doing" or "what did we promise <company>", read
+these, and quote the reasons and the call's words rather than paraphrasing them.
+Turning the sync on or off, and what it reads, is a person's decision made in
+Settings → Meetings; you can run it (`POST /api/meetings/sync-now`).
 
 ## Import contacts (CSV / XLSX)
 

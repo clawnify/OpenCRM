@@ -24,7 +24,7 @@ function pagParams(pag: PaginatedState): URLSearchParams {
 }
 
 export function useCrmState(isAgent: boolean): CrmContextValue {
-  const [stats, setStats] = useState<Stats>({ contacts: 0, companies: 0, deals: 0, dealValue: 0 });
+  const [stats, setStats] = useState<Stats>({ contacts: 0, companies: 0, deals: 0, dealValue: 0, customers: 0 });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -40,7 +40,7 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
   const [boardDeals, setBoardDeals] = useState<Deal[]>([]);
   const [boardFilters, setBoardFilters] = useState<FilterNode[]>([]);
 
-  const [connections, setConnections] = useState<ConnectionStatus>({ email: false, meeting: false, slack: false });
+  const [connections, setConnections] = useState<ConnectionStatus>({ email: false, meeting: false, slack: false, notes: false });
   const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
   const [stages, setStages] = useState<StageDef[]>([]);
   // Bumped on every record write, so an open record page re-reads itself.

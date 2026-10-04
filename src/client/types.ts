@@ -57,6 +57,8 @@ export interface Company {
   phone: string;
   email: string;
   notes: string;
+  /** The day they became a customer (YYYY-MM-DD); null = not a customer. */
+  customer_since?: string | null;
   contact_count?: number;
   custom?: Record<string, unknown>; // write payload; on reads, values are flat columns
   relations?: Record<string, RelationValue>; // reads only, keyed by relation field
@@ -174,6 +176,7 @@ export interface Stats {
   companies: number;
   deals: number;
   dealValue: number;
+  customers: number;
 }
 
 export interface PaginatedState {
@@ -200,6 +203,8 @@ export interface ConnectionStatus {
   email: boolean;
   meeting: boolean;
   slack: boolean;
+  /** Granola: call notes and transcripts. */
+  notes: boolean;
 }
 
 // Entities that support bulk spreadsheet import.
@@ -244,4 +249,156 @@ export interface AiCellState {
   field_key: string;
   status: "queued" | "running" | "error";
   error: string | null;
+}
+
+// ── Meetings, tasks, insights, customers ──
+
+export interface MeetingPerson {
+  email: string;
+  name: string | null;
+}
+
+export type MeetingLink = "auto" | "manual" | "unmatched" | "ignored";
+export type DigestStatus = "none" | "queued" | "running" | "done" | "error";
+
+export interface Meeting {
+  id: string;
+  title: string;
+  starts_at: string;
+  ends_at: string | null;
+  attendees: MeetingPerson[];
+  company_id: string | null;
+  company_name: string | null;
+  company_domain: string | null;
+  link_status: MeetingLink;
+  calendar_url: string | null;
+  note_url: string | null;
+  has_note: boolean;
+  summary: string | null;
+  /** -2 (badly) to 2 (very well). */
+  sentiment: number | null;
+  sentiment_reason: string | null;
+  digest_status: DigestStatus;
+  digest_error: string | null;
+}
+
+export interface MeetingSyncSettings {
+  enabled: boolean;
+  history_days: number;
+  about: string;
+  calendar_owner: string | null;
+  phase: "idle" | "importing" | "live";
+  calendar_synced_at: string | null;
+  last_run_at: string | null;
+  last_error: string | null;
+  next_run_at: string | null;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface MeetingCounts {
+  meetings: number;
+  linked: number;
+  unmatched: number;
+  with_notes: number;
+  digested: number;
+  waiting: number;
+  failed: number;
+}
+
+export interface MeetingSyncStatus {
+  sources: { calendar: boolean; notes: boolean };
+  settings: MeetingSyncSettings | null;
+  counts: MeetingCounts;
+  history_choices: number[];
+  can_configure: boolean;
+}
+
+export type OwedBy = "us" | "them";
+
+export interface Task {
+  id: string;
+  title: string;
+  company_id: string | null;
+  company_name: string | null;
+  contact_id: string | null;
+  deal_id: string | null;
+  meeting_id: string | null;
+  meeting_title: string | null;
+  meeting_starts_at: string | null;
+  owed_by: OwedBy;
+  due_date: string | null;
+  done: boolean;
+  done_at: string | null;
+  quote: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type InsightKind = "idea" | "expansion" | "risk";
+
+export interface Insight {
+  id: string;
+  company_id: string;
+  company_name: string | null;
+  meeting_id: string | null;
+  meeting_title: string | null;
+  meeting_starts_at: string | null;
+  kind: InsightKind;
+  text: string;
+  quote: string | null;
+  status: "open" | "done" | "dismissed";
+  deal_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type HealthStatus = "red" | "yellow" | "green";
+
+export interface CustomerRow {
+  id: string;
+  name: string;
+  domain: string;
+  customer_since: string;
+  status: HealthStatus;
+  reasons: string[];
+  last_touch_at: string | null;
+  days_quiet: number | null;
+  last_meeting_at: string | null;
+  next_meeting_at: string | null;
+  last_summary: string | null;
+  last_sentiment: number | null;
+  ours_open: number;
+  ours_overdue: number;
+  theirs_open: number;
+  ideas: number;
+  expansion: number;
+  risks: number;
+}
+
+export interface FocusItem {
+  kind: "overdue" | "reach_out" | "due_today" | "risk";
+  company_id: string;
+  company_name: string;
+  text: string;
+  task_id?: string;
+}
+
+export interface UpcomingCall {
+  id: string;
+  title: string;
+  starts_at: string;
+  company_id: string;
+  company_name: string;
+  company_domain: string;
+  ours_open: number;
+  last_summary: string | null;
+}
+
+export interface CustomersOverview {
+  customers: CustomerRow[];
+  focus: FocusItem[];
+  upcoming: UpcomingCall[];
+  counts: Record<HealthStatus, number>;
 }
