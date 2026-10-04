@@ -9,6 +9,7 @@ import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ValuesMenu } from "@/components/cell-editors";
 import { cn } from "@/lib/utils";
+import { useComposer } from "@/components/email/composer";
 import type { Company, Activity } from "@/types";
 
 function formatTimestamp(createdAt: string): string {
@@ -21,7 +22,8 @@ function formatTimestamp(createdAt: string): string {
 // control; there is no edit mode. `panel` renders it in the side panel beside
 // the companies list, as ContactDetail does.
 export function CompanyDetail({ id, navigate, panel = false }: { id: string; navigate: (to: string) => void; panel?: boolean }) {
-  const { fetchCompany, updateCompany, fetchActivities, setError, customFields, changes } = useCrm();
+  const { fetchCompany, updateCompany, fetchActivities, setError, customFields, changes, connections } = useCrm();
+  const { compose } = useComposer();
   const relationDefs = customFields.filter((d) => d.entity_type === "company" && d.field_type === "relation");
   const [company, setCompany] = useState<Company | null | undefined>(undefined);
   useRecordChat("company", "Company", id, company ? company.name : undefined);
@@ -87,9 +89,15 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
           </div>
 
           <div className="flex flex-wrap gap-2 px-4 pt-3 pb-4">
-            <Button variant="outline" size="sm" disabled={!company.email} asChild={!!company.email}>
-              {company.email ? <a href={`mailto:${company.email}`}><Mail className="size-4" /> Compose email</a> : <><Mail className="size-4" /> Compose email</>}
-            </Button>
+            {connections.email ? (
+              <Button variant="outline" size="sm" onClick={() => compose({ to: company.email ? [{ email: company.email.toLowerCase(), name: company.name || null }] : [] })}>
+                <Mail className="size-4" /> Compose email
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" disabled={!company.email} asChild={!!company.email}>
+                {company.email ? <a href={`mailto:${company.email}`}><Mail className="size-4" /> Compose email</a> : <><Mail className="size-4" /> Compose email</>}
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => navigate(`/contacts?company=${encodeURIComponent(company.id)}`)}>
               <Users className="size-4" /> Contacts {company.contact_count ? <span className="rounded-xs bg-secondary px-1.5 text-xs tabular text-muted-foreground">{company.contact_count}</span> : null}
             </Button>

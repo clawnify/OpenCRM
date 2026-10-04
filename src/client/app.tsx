@@ -5,6 +5,7 @@ import { useCrmState } from "./hooks/use-crm";
 import { CrmContext } from "./context";
 import { useRouter, withQuery, type Route } from "./hooks/use-router";
 import { ErrorBanner } from "./components/error-banner";
+import { ComposerProvider } from "./components/email/composer";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { ContactsPage } from "./components/contacts/contacts-page";
 import { ContactDetail } from "./components/contacts/contact-detail";
@@ -74,6 +75,7 @@ export function App() {
   return (
     <CrmContext.Provider value={state}>
     <TooltipProvider delayDuration={200}>
+    <ComposerProvider>
       <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row" data-nav-collapsed={navCollapsed || undefined}>
         {/* flex, so the SDK aside stretches to the row height like a direct child */}
         <div className="relative flex shrink-0">
@@ -151,6 +153,7 @@ export function App() {
         </main>
         <ErrorBanner />
       </div>
+    </ComposerProvider>
     </TooltipProvider>
     </CrmContext.Provider>
   );

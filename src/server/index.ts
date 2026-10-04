@@ -2,7 +2,7 @@ import { createApp, createRoute, widgets, z, caller, user } from "@clawnify/app"
 import { verifyDelivery } from "@clawnify/queue";
 import { query, get, run } from "./db.js";
 import type { CredentialBinding } from "@clawnify/connections";
-import { sendEmail, createMeeting, notifySlack, connectionStatus, mailConnection } from "./integrations.js";
+import { sendEmail, replyToThread, forwardMessage, createMeeting, notifySlack, connectionStatus, mailConnection } from "./integrations.js";
 import {
   listDefs,
   createDef,
@@ -22,7 +22,7 @@ import {
 import { workEmailDomain, findOrCreateCompanyByDomain } from "./email-domains.js";
 import {
   connectedMailbox, currentAccount, accountFor, runSync, scheduleRun, ensureScheduled, cancelScheduled, listLabels,
-  purge, restartImport, forgetSubjects, firstStep, contactEmails, importContactIfNeeded, openEmail, counts,
+  purge, restartImport, forgetSubjects, firstStep, contactEmails, importContactIfNeeded, openEmail, knownEmail, counts,
   VISIBILITIES, AUTO_CREATES, HISTORIES, LIVE_INTERVAL_MS, type EmailAccount,
 } from "./email-sync.js";
 import { normaliseBlocklist } from "./email-sync-rules.js";
@@ -1916,33 +1916,103 @@ app.post("/api/activities", async (c) => {
 
 // ── Integrations (Clawnify connections) ────────────────────────────
 
+// mailbox: the address email goes out from, known once email sync has been set up.
 app.get("/api/integrations/status", async (c) => {
+  const mailbox = (await currentAccount().catch(() => null))?.mailbox ?? null;
   try {
-    return c.json(await connectionStatus(c.env), 200);
+    return c.json({ ...(await connectionStatus(c.env)), mailbox }, 200);
   } catch {
-    return c.json({ email: false, meeting: false, slack: false }, 200);
+    return c.json({ email: false, meeting: false, slack: false, mailbox }, 200);
   }
 });
 
-// Email a contact via connected Gmail, then log it on the contact's timeline.
+// Send from the connected Gmail: a new email, a reply inside a synced thread
+// (reply_to), or a forward of a synced email (forward). Every recipient who is
+// a contact gets it on their timeline. contact_id is shorthand for "to this
+// contact" and still works on its own.
+const MAX_RECIPIENTS = 50;
+const EMAIL_RE = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
+
+/** Lower-cased, de-duplicated addresses, or the first one that isn't an address. */
+function addressList(v: unknown): { ok: string[] } | { bad: string } {
+  if (v === undefined || v === null) return { ok: [] };
+  if (!Array.isArray(v)) return { bad: String(v) };
+  const out: string[] = [];
+  for (const raw of v) {
+    const e = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+    if (!EMAIL_RE.test(e)) return { bad: String(raw) };
+    if (!out.includes(e)) out.push(e);
+  }
+  return { ok: out };
+}
+
+type MessageRef = { mailbox: string; id: string };
+const messageRef = (v: unknown): MessageRef | null =>
+  v && typeof v === "object" && typeof (v as MessageRef).mailbox === "string" && typeof (v as MessageRef).id === "string"
+    ? { mailbox: (v as MessageRef).mailbox.trim().toLowerCase(), id: (v as MessageRef).id.trim() }
+    : null;
+
 app.post("/api/integrations/email", async (c) => {
   try {
-    const body = await c.req.json<{ contact_id?: string; subject?: string; body?: string }>();
-    const contactId = (body.contact_id || "").trim();
+    const body = await c.req.json<{
+      contact_id?: string; to?: unknown; cc?: unknown; bcc?: unknown;
+      subject?: string; body?: string; reply_to?: unknown; forward?: unknown;
+    }>();
     const subject = (body.subject || "").trim();
     const text = (body.body || "").trim();
-    if (!contactId) return c.json({ error: "contact_id is required" }, 400);
-    if (!subject && !text) return c.json({ error: "A subject or body is required" }, 400);
+    const replyTo = body.reply_to === undefined ? null : messageRef(body.reply_to);
+    const forward = body.forward === undefined ? null : messageRef(body.forward);
+    if (body.reply_to !== undefined && !replyTo) return c.json({ error: "reply_to must be { mailbox, id }" }, 400);
+    if (body.forward !== undefined && !forward) return c.json({ error: "forward must be { mailbox, id }" }, 400);
+    if (replyTo && forward) return c.json({ error: "Send a reply or a forward, not both" }, 400);
 
-    const contact = await get<{ email: string; first_name: string; last_name: string }>(
-      "SELECT email, first_name, last_name FROM contacts WHERE id = ?",
-      [contactId],
+    const lists = { to: addressList(body.to), cc: addressList(body.cc), bcc: addressList(body.bcc) };
+    for (const [field, l] of Object.entries(lists)) {
+      if ("bad" in l) return c.json({ error: `${field}: "${l.bad}" is not an email address` }, 400);
+    }
+    const to = (lists.to as { ok: string[] }).ok;
+    const cc = (lists.cc as { ok: string[] }).ok;
+    const bcc = (lists.bcc as { ok: string[] }).ok;
+
+    const contactId = (body.contact_id || "").trim();
+    if (contactId) {
+      const contact = await get<{ email: string }>("SELECT lower(trim(email)) AS email FROM contacts WHERE id = ?", [contactId]);
+      if (!contact) return c.json({ error: "Contact not found" }, 404);
+      if (!contact.email) return c.json({ error: "Contact has no email address" }, 400);
+      if (!to.includes(contact.email)) to.unshift(contact.email);
+    }
+    if (!to.length) return c.json({ error: "Add at least one recipient" }, 400);
+    if (to.length + cc.length + bcc.length > MAX_RECIPIENTS) return c.json({ error: `At most ${MAX_RECIPIENTS} recipients per email` }, 400);
+
+    let logged: string;
+    if (replyTo || forward) {
+      const ref = (replyTo ?? forward)!;
+      const known = await knownEmail(ref.mailbox, ref.id);
+      if (!known) return c.json({ error: "Email not found" }, 404);
+      // A forward carries the email's text to someone new, so it needs the mailbox to share everything.
+      if (forward && known.visibility !== "everything") return c.json({ error: "This mailbox shares metadata only; forward the email from Gmail" }, 403);
+      const original = known.visibility === "metadata" ? "" : (known.subject ?? "");
+      if (replyTo) {
+        if (!text) return c.json({ error: "Write a reply first" }, 400);
+        await replyToThread(c.env, { to, cc, bcc, threadId: known.thread_id, body: text });
+        logged = original ? `Re: ${original.replace(/^re:\s*/i, "")}` : "Reply";
+      } else {
+        await forwardMessage(c.env, { to, cc, bcc, messageId: ref.id, note: text });
+        logged = original ? `Fwd: ${original.replace(/^fwd?:\s*/i, "")}` : "Forwarded email";
+      }
+    } else {
+      if (!subject && !text) return c.json({ error: "A subject or body is required" }, 400);
+      await sendEmail(c.env, { to, cc, bcc, subject, body: text });
+      logged = subject || "(no subject)";
+    }
+
+    const everyone = [...to, ...cc, ...bcc];
+    const contacts = await query<{ id: string }>(
+      `SELECT id FROM contacts WHERE lower(trim(email)) IN (${everyone.map(() => "?").join(", ")})`,
+      everyone,
     );
-    if (!contact) return c.json({ error: "Contact not found" }, 404);
-    if (!contact.email) return c.json({ error: "Contact has no email address" }, 400);
-
-    await sendEmail(c.env, { to: contact.email, subject, body: text });
-    await logActivity("contact", contactId, "email", subject || "(no subject)", { to: contact.email });
+    const ids = new Set([...contacts.map((r) => r.id), ...(contactId ? [contactId] : [])]);
+    for (const id of ids) await logActivity("contact", id, "email", logged, { to, ...(cc.length ? { cc } : {}) });
     return c.json({ ok: true }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
