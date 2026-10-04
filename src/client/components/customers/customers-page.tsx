@@ -20,7 +20,7 @@ const FOCUS_ICON: Record<FocusItem["kind"], typeof AlarmClock> = {
  * Customers: how each account is doing, worst first, with the reasons in plain
  * words; the few things worth doing first; and the calls coming up this week.
  * A company is a customer from its "Customer since" day (set on its page, or
- * when one of its deals is won).
+ * from the close date of its first won deal).
  */
 export function CustomersPage({ navigate }: { navigate: (to: string) => void }) {
   const { setError, changes } = useCrm();
@@ -83,7 +83,7 @@ export function CustomersPage({ navigate }: { navigate: (to: string) => void }) 
 
       {data.customers.length === 0 ? (
         <EmptyState
-          title="No customers yet. A company becomes a customer when you set Customer since on its page, or when one of its deals is won."
+          title="No customers yet. A company becomes a customer when one of its deals is won (from that deal's close date), or when you set Customer since on its page."
           action={<Button size="sm" variant="outline" onClick={() => navigate("/companies")}>Go to companies</Button>}
         />
       ) : (

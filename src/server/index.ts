@@ -223,7 +223,7 @@ const CompanySchema = z.object({
   phone: z.string(),
   email: z.string(),
   notes: z.string(),
-  customer_since: z.string().nullable().optional().openapi({ description: "The day they became a customer (YYYY-MM-DD); null = not a customer. Set when one of their deals first reaches a won stage" }),
+  customer_since: z.string().nullable().optional().openapi({ description: "The day they became a customer (YYYY-MM-DD); null = not a customer. Set from the close date of their first won deal" }),
   contact_count: z.number().int().optional(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -547,6 +547,7 @@ app.openapi(getStats, async (c) => {
     const companies = await get<{ count: number }>("SELECT COUNT(*) as count FROM companies");
     const deals = await get<{ count: number }>("SELECT COUNT(*) as count FROM deals");
     const dealValue = await get<{ total: number }>("SELECT COALESCE(SUM(value), 0) as total FROM deals WHERE stage NOT IN (SELECT key FROM stages WHERE is_lost = 1)");
+    await backfillCustomers();
     const customers = await get<{ count: number }>("SELECT COUNT(*) as count FROM companies WHERE customer_since IS NOT NULL AND TRIM(customer_since) != ''");
     return c.json({
       contacts: contacts?.count || 0,
@@ -1554,6 +1555,45 @@ async function backfillDealCompanies(): Promise<void> {
   dealCompaniesBackfilled = true;
 }
 
+let customersBackfilled = false; // per-isolate fast path
+
+/** The day a won deal makes its company a customer: its close date, or today when it has none. */
+function wonDay(closeDate: unknown): string {
+  return typeof closeDate === "string" && isDay(closeDate.trim()) ? closeDate.trim() : new Date().toISOString().slice(0, 10);
+}
+
+/** A company is a customer from the day its first deal closed won. A date already there (set by a person, or by an earlier win) stays. */
+async function markCustomer(companyId: string, day: string): Promise<void> {
+  await run(
+    "UPDATE companies SET customer_since = ?, updated_at = datetime('now') WHERE id = ? AND (customer_since IS NULL OR TRIM(customer_since) = '')",
+    [day, companyId],
+  );
+}
+
+/**
+ * Deals won before customer_since existed: their companies become customers
+ * from the first one's close date (or the day it was last changed, when it has
+ * none), once per database. Like backfillDealCompanies, the marker is what stops
+ * a later run from refilling a date someone cleared on purpose.
+ */
+async function backfillCustomers(): Promise<void> {
+  if (customersBackfilled) return;
+  const done = await get("SELECT key FROM data_backfills WHERE key = 'companies.customer_since'");
+  if (!done) {
+    await backfillDealCompanies();
+    await run(
+      `UPDATE companies SET customer_since = (
+          SELECT MIN(CASE WHEN d.close_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN d.close_date ELSE date(d.updated_at) END)
+            FROM deals d JOIN stages s ON s.key = d.stage AND s.is_won = 1
+           WHERE d.company_id = companies.id)
+        WHERE (customer_since IS NULL OR TRIM(customer_since) = '')
+          AND EXISTS (SELECT 1 FROM deals d JOIN stages s ON s.key = d.stage AND s.is_won = 1 WHERE d.company_id = companies.id)`,
+    );
+    await run("INSERT OR IGNORE INTO data_backfills (key) VALUES ('companies.customer_since')");
+  }
+  customersBackfilled = true;
+}
+
 const getDealsBoard = createRoute({
   method: "get",
   path: "/api/deals/board",
@@ -1735,6 +1775,7 @@ app.openapi(createDeal, async (c) => {
     );
 
     await applyCustomValues("deal", "deals", id, customValues);
+    if (companyId && (await getStageRow(stageKey))?.is_won) await markCustomer(companyId, wonDay(body.close_date));
 
     const inserted = await get(DEAL_SELECT + " WHERE d.id = ?", [id]);
     return c.json({ deal: await withRelationsOne("deal", inserted) }, 201);
@@ -1848,10 +1889,8 @@ app.openapi(updateDeal, async (c) => {
       if (st?.is_won) {
         const value = Number(updated.value) || 0;
         await logActivity("deal", id, "stage_change", `Deal won — ${st.label}`, { stage: body.stage, value });
-        // Their first won deal makes the company a customer (the Customers page).
-        if (updated.company_id) {
-          await run("UPDATE companies SET customer_since = date('now'), updated_at = datetime('now') WHERE id = ? AND (customer_since IS NULL OR TRIM(customer_since) = '')", [updated.company_id]);
-        }
+        // Their first won deal makes the company a customer (the Customers page), from its close date.
+        if (updated.company_id) await markCustomer(String(updated.company_id), wonDay(updated.close_date));
         const channel = c.env.SLACK_CHANNEL?.trim();
         if (channel) {
           const contact = [updated.contact_first_name, updated.contact_last_name].filter(Boolean).join(" ");
@@ -2924,6 +2963,7 @@ const customersRoute = createRoute({
 
 app.openapi(customersRoute, async (c) => {
   try {
+    await backfillCustomers();
     const tz = Number(c.req.valid("query").tz ?? 0);
     return c.json(await customersOverview(new Date(), Number.isFinite(tz) ? Math.max(-840, Math.min(840, tz)) : 0), 200);
   } catch (err: unknown) {

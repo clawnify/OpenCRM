@@ -158,7 +158,7 @@ deals     (id, name, contact_id → contacts, company_id → companies, value, s
 
 Contacts belong to companies. A deal has its own company and its own contact, both optional: a deal can name a company before it has a person. Setting a contact on a deal with no company gives the deal that contact's company. Deleting a company sets `company_id` to NULL on its contacts and deals. Deleting a contact sets `contact_id` to NULL on its deals.
 
-Meetings come from the calendar and Granola (`meetings`, one row per meeting with people from outside, linked to a company); a call's tasks (`tasks`, `owed_by` us or them) and insights (`insights`: idea, expansion or risk) point back at it. A company with `customer_since` set is a customer.
+Meetings come from the calendar and Granola (`meetings`, one row per meeting with people from outside, linked to a company); a call's tasks (`tasks`, `owed_by` us or them) and insights (`insights`: idea, expansion or risk) point back at it. A company with `customer_since` set is a customer: the close date of its first won deal, unless someone set it by hand.
 
 Custom attributes are real columns, registered in `custom_field_defs`. A relation is two defs, one per side, pointing at each other (`inverse_def_id`). The single side (`many_to_one`) is an indexed column holding the linked record's id, its key ending in `_id`; the many side (`one_to_many`) has no column and is read back from it. Relation columns carry no foreign key, since SQLite can't drop a column that has one; the API clears links when a record is deleted.
 

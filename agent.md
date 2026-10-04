@@ -115,7 +115,7 @@ Transcripts stay in Granola. Meetings with only the team are never listed.
   each with `status` (red/yellow/green) and the `reasons` in plain words; `focus`
   (the few things to do first) and `upcoming` (calls with customers this week).
   A company becomes a customer with `PUT /api/companies/{id}` `{ customer_since: "YYYY-MM-DD" }`,
-  or when one of its deals reaches a won stage.
+  or from the close date of its first won deal.
 
 To answer "how is <customer> doing" or "what did we promise <company>", read
 these, and quote the reasons and the call's words rather than paraphrasing them.

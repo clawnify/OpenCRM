@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS companies (
   email TEXT DEFAULT '',
   notes TEXT DEFAULT '',
   -- The day they became a customer (YYYY-MM-DD); NULL = not a customer. Set by
-  -- hand, or when one of their deals first reaches a won stage. Customers are
-  -- the accounts on the Customers page.
+  -- hand, or from the close date of their first won deal. Customers are the
+  -- accounts on the Customers page.
   customer_since TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
