@@ -2734,7 +2734,11 @@ app.openapi(updateTaskRoute, async (c) => {
     if (body[key] !== undefined) { sets.push(`${key} = ?`); params.push(body[key]); }
   }
   // A task moved to another company is the mover's: it no longer follows its call's company.
-  if (body.company_id !== undefined) { sets.push("created_by = ?"); params.push(user(c)?.email ?? caller(c) ?? null); }
+  // Only a real move counts (SET reads the row as it was), so resending the same company changes nothing.
+  if (body.company_id !== undefined) {
+    sets.push("created_by = CASE WHEN company_id IS NOT ? THEN ? ELSE created_by END");
+    params.push(body.company_id, user(c)?.email ?? caller(c) ?? null);
+  }
   if (body.due_date !== undefined) { sets.push("due_date = ?"); params.push(body.due_date || null); }
   if (body.done !== undefined) sets.push(body.done ? "done_at = COALESCE(done_at, datetime('now'))" : "done_at = NULL");
   if (!sets.length) return c.json({ error: "No fields to update" }, 400);
