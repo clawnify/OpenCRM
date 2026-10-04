@@ -2602,7 +2602,7 @@ const TaskSchema = z.object({
   done: z.boolean(),
   done_at: z.string().nullable(),
   quote: z.string().nullable().openapi({ description: "The words in the call it came from" }),
-  created_by: z.string().nullable().openapi({ description: "ai, or the person's email" }),
+  created_by: z.string().nullable().openapi({ description: "ai while the task follows its call's company; otherwise the person who created it or moved it" }),
   created_at: z.string(),
   updated_at: z.string(),
 }).openapi("Task");
@@ -2733,6 +2733,8 @@ app.openapi(updateTaskRoute, async (c) => {
   for (const key of ["company_id", "contact_id", "deal_id", "owed_by"] as const) {
     if (body[key] !== undefined) { sets.push(`${key} = ?`); params.push(body[key]); }
   }
+  // A task moved to another company is the mover's: it no longer follows its call's company.
+  if (body.company_id !== undefined) { sets.push("created_by = ?"); params.push(user(c)?.email ?? caller(c) ?? null); }
   if (body.due_date !== undefined) { sets.push("due_date = ?"); params.push(body.due_date || null); }
   if (body.done !== undefined) sets.push(body.done ? "done_at = COALESCE(done_at, datetime('now'))" : "done_at = NULL");
   if (!sets.length) return c.json({ error: "No fields to update" }, 400);
@@ -2762,7 +2764,7 @@ app.openapi(deleteTaskRoute, async (c) => {
 
 const InsightSchema = z.object({
   id: z.string(),
-  company_id: z.string(),
+  company_id: z.string().nullable().openapi({ description: "The call's company; null while the call is linked to none" }),
   company_name: z.string().nullable(),
   meeting_id: z.string().nullable(),
   meeting_title: z.string().nullable(),
@@ -2860,6 +2862,7 @@ app.openapi(insightDealRoute, async (c) => {
   const insight = await get<z.infer<typeof InsightSchema>>(`${INSIGHT_SELECT} WHERE i.id = ?`, [id]);
   if (!insight) return c.json({ error: "Insight not found" }, 404);
   if (insight.deal_id) return c.json({ error: "This is already a deal" }, 409);
+  if (!insight.company_id) return c.json({ error: "Link its call to a company first" }, 409);
   await ensureStagesSeeded();
   const first = await get<{ key: string }>("SELECT key FROM stages WHERE is_won = 0 AND is_lost = 0 ORDER BY position LIMIT 1");
   const dealId = crypto.randomUUID();

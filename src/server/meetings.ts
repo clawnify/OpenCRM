@@ -196,6 +196,26 @@ export async function relinkUnmatched(): Promise<number> {
   return linked;
 }
 
+/**
+ * What a call produced goes where the call goes. The meeting's company is the
+ * one truth: its AI tasks and its insights follow it when the meeting is linked
+ * again (by a person, or by a later sync), and wait on no company while it is
+ * unlinked, so linking it again brings them back without reading the call twice.
+ * A task a person moved to another company is theirs (updateTask), and stays.
+ */
+export async function syncCallItems(): Promise<void> {
+  await run(
+    `UPDATE tasks SET company_id = (SELECT m.company_id FROM meetings m WHERE m.id = tasks.meeting_id), updated_at = datetime('now')
+      WHERE created_by = 'ai' AND meeting_id IS NOT NULL
+        AND company_id IS NOT (SELECT m.company_id FROM meetings m WHERE m.id = tasks.meeting_id)`,
+  );
+  await run(
+    `UPDATE insights SET company_id = (SELECT m.company_id FROM meetings m WHERE m.id = insights.meeting_id), updated_at = datetime('now')
+      WHERE meeting_id IS NOT NULL
+        AND company_id IS NOT (SELECT m.company_id FROM meetings m WHERE m.id = insights.meeting_id)`,
+  );
+}
+
 /** Every linked meeting with a note and no digest yet waits for one. */
 async function queueDigests(): Promise<void> {
   await run(
@@ -532,6 +552,7 @@ export async function runMeetings(env: ConnectionsEnv & AiEnv, now = new Date(),
     if (cursor) {
       const pass = await syncPass(env, s, cursor, now, started + RUN_BUDGET_MS);
       await relinkUnmatched();
+      await syncCallItems();
       await queueDigests();
       if (pass.finished) {
         const until = later(s.notes_synced_until, cursor.max_seen);
@@ -671,13 +692,16 @@ export async function getMeeting(id: string): Promise<MeetingView | null> {
  * A person links a meeting to a company, unlinks it, or marks it as not an
  * account meeting. A company with no domain takes the domain of the people met,
  * so their later meetings link themselves; other unlinked meetings the CRM can
- * now place go with it.
+ * now place go with it. What the call produced follows (syncCallItems); marking
+ * it as not an account meeting drops what it left open.
  */
 export async function linkMeeting(id: string, to: { company_id: string | null } | { ignored: true }): Promise<MeetingView | null> {
   const m = await get<MeetingRow>("SELECT * FROM meetings WHERE id = ? AND link_status != 'internal'", [id]);
   if (!m) return null;
   if ("ignored" in to) {
     await run("UPDATE meetings SET company_id = NULL, link_status = 'ignored', updated_at = datetime('now') WHERE id = ?", [id]);
+    await run("DELETE FROM tasks WHERE meeting_id = ? AND created_by = 'ai' AND done_at IS NULL", [id]);
+    await run("DELETE FROM insights WHERE meeting_id = ? AND status = 'open'", [id]);
   } else if (to.company_id) {
     await run("UPDATE meetings SET company_id = ?, link_status = 'manual', updated_at = datetime('now') WHERE id = ?", [to.company_id, id]);
     const domains = [...new Set(jsonPeople(m.attendees).map((p) => emailDomain(p.email)).filter((d) => d && !isPersonal(d)))];
@@ -688,6 +712,7 @@ export async function linkMeeting(id: string, to: { company_id: string | null } 
   } else {
     await run("UPDATE meetings SET company_id = NULL, link_status = 'unmatched', updated_at = datetime('now') WHERE id = ?", [id]);
   }
+  await syncCallItems();
   await queueDigests();
   return getMeeting(id);
 }

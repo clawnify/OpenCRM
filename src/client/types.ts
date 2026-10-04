@@ -359,7 +359,8 @@ export type InsightKind = "idea" | "expansion" | "risk";
 
 export interface Insight {
   id: string;
-  company_id: string;
+  /** The call's company; null while the call is linked to none. */
+  company_id: string | null;
   company_name: string | null;
   meeting_id: string | null;
   meeting_title: string | null;

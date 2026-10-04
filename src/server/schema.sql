@@ -315,7 +315,8 @@ CREATE INDEX IF NOT EXISTS idx_meetings_digest ON meetings(digest_status, update
 
 -- Something to do for an account: typed by a person, or promised in a call
 -- (meeting_id, with the words it came from in `quote`). owed_by says whose
--- promise it is: 'us' (we owe it) or 'them' (we're waiting on them).
+-- promise it is: 'us' (we owe it) or 'them' (we're waiting on them). A task the
+-- AI took from a call (created_by 'ai') follows its call's company, as insights do.
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -327,7 +328,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   due_date TEXT,                            -- YYYY-MM-DD
   done_at TEXT,                             -- NULL = open
   quote TEXT,
-  created_by TEXT,                          -- 'ai', or the person's email
+  created_by TEXT,                          -- 'ai' (follows its call), or the person who created or moved it
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -336,9 +337,11 @@ CREATE INDEX IF NOT EXISTS idx_tasks_open ON tasks(done_at, due_date);
 
 -- What a call said about an account beyond tasks: an idea or use case worth
 -- proposing, room to expand (upsell), or a risk. Open until someone acts on it.
+-- It belongs to its call's company: company_id follows meetings.company_id, and
+-- is NULL while the call is linked to no company.
 CREATE TABLE IF NOT EXISTS insights (
   id TEXT PRIMARY KEY,
-  company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  company_id TEXT REFERENCES companies(id) ON DELETE CASCADE,
   meeting_id TEXT REFERENCES meetings(id) ON DELETE SET NULL,
   kind TEXT NOT NULL,                       -- 'idea' | 'expansion' | 'risk'
   text TEXT NOT NULL,
