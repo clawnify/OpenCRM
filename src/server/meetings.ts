@@ -18,6 +18,7 @@ import { get, query, run } from "./db.js";
 import { calendarConnection, notesConnection, type GoogleConnection } from "./integrations.js";
 import { FREEMAIL_DOMAINS } from "./email-domains.js";
 import { complete, ModelError, type AiEnv } from "./model.js";
+import { bookableAt } from "./jobs.js";
 import {
   ownSide, eventMeeting, matchCompany, normaliseDomain, emailDomain, noteWindow, placeNote, notePeople,
   transcriptText, speakersKnown, coerceDigest, FRESH_DAYS,
@@ -591,10 +592,12 @@ type QueueEnv = { CLAWNIFY_TOKEN?: string; CLAWNIFY_QUEUE_URL?: string };
 
 /**
  * Books the next run on the platform queue, keyed by the app's host and the
- * target minute so two requests noticing the same gap book one job. Without a
- * queue (local dev, an outage) the next page view or "Sync now" books again.
+ * target minute so two requests noticing the same gap book one job; never for
+ * the current minute (see bookableAt). Without a queue (local dev, an outage)
+ * the next page view or "Sync now" books again.
  */
-export async function scheduleRun(env: QueueEnv, origin: string, runAt: Date): Promise<void> {
+export async function scheduleRun(env: QueueEnv, origin: string, when: Date): Promise<void> {
+  const runAt = bookableAt(when);
   try {
     const { enqueueJob } = await import("@clawnify/queue");
     const job = await enqueueJob(env, {

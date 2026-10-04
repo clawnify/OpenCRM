@@ -16,6 +16,7 @@ import { renderMarkdown } from "@clawnify/services";
 import { complete, ModelError, type AiEnv } from "./model.js";
 import { get, query, run } from "./db.js";
 import { ENTITY_TABLES, listDefs, coerceCustomValue, type CustomFieldDef, type EntityType } from "./custom-fields.js";
+import { bookableAt } from "./jobs.js";
 
 /** At most this many rows per fill. */
 export const FILL_LIMIT = 20;
@@ -412,11 +413,14 @@ export async function runQueued(env: AiEnv): Promise<{ filled: number; failed: n
   return { filled, failed, more: (left?.n ?? 0) > 0 };
 }
 
-/** Book a run on the platform queue, a minute out: the backstop for a run the request couldn't finish. */
+/**
+ * Book a run on the platform queue, a minute out: the backstop for a run the
+ * request couldn't finish. Never for the current minute (see bookableAt).
+ */
 export async function scheduleRun(env: AiEnv & { CLAWNIFY_QUEUE_URL?: string }, origin: string, delayMs = 60_000): Promise<void> {
   try {
     const { enqueueJob } = await import("@clawnify/queue");
-    const runAt = new Date(Date.now() + delayMs);
+    const runAt = bookableAt(new Date(Date.now() + delayMs));
     await enqueueJob(env, {
       targetUrl: `${origin}/api/ai-columns/run`,
       payload: {},
