@@ -68,7 +68,7 @@ export function isEntityType(v: string): v is EntityType {
 // Built-in columns per table — a custom key may never collide with these, so
 // schema-sync can never add/drop a platform column.
 const BUILTIN_COLUMNS: Record<EntityType, ReadonlySet<string>> = {
-  company: new Set(["id", "name", "domain", "industry", "phone", "email", "notes", "customer_since", "created_at", "updated_at"]),
+  company: new Set(["id", "name", "domain", "industry", "phone", "email", "notes", "customer_since", "renewal_date", "created_at", "updated_at"]),
   contact: new Set(["id", "first_name", "last_name", "email", "phone", "company_id", "title", "status", "last_contacted_at", "created_at", "updated_at"]),
   deal: new Set(["id", "name", "contact_id", "company_id", "value", "stage", "close_date", "notes", "created_at", "updated_at"]),
 };

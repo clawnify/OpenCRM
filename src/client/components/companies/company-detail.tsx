@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Mail, Star, LayoutGrid, Activity as ActivityIcon, Phone, Globe, Building2, Tag, AtSign, Users, StickyNote, Calendar, CalendarDays, Clock, CheckSquare, BadgeCheck } from "lucide-react";
+import { ArrowLeft, Mail, Star, LayoutGrid, Activity as ActivityIcon, Phone, Globe, Building2, Tag, AtSign, Users, StickyNote, Calendar, CalendarDays, Clock, CheckSquare, BadgeCheck, CalendarClock } from "lucide-react";
 import { useCrm } from "@/context";
 import { EntityIcon, CategoryBadge } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,12 @@ export function CompanyDetail({ id, navigate, panel = false }: { id: string; nav
                 <InlineField type="date" value={company.customer_since ?? ""} placeholder="Not a customer" onSave={(v) => saveField({ customer_since: v || null })}
                   render={(v) => <span className="tabular">{formatDate(v)}</span>} />
               </Attr>
+              {(company.customer_since || company.renewal_date) && (
+                <Attr icon={CalendarClock} label="Renews">
+                  <InlineField type="date" value={company.renewal_date ?? ""} placeholder="Set renewal…" onSave={(v) => saveField({ renewal_date: v || null })}
+                    render={(v) => <span className="tabular">{formatDate(v)}</span>} />
+                </Attr>
+              )}
               <RelationAttrs defs={relationDefs} row={company} onSave={(key, v) => saveField({ [key]: v } as Partial<Company>)} />
             </dl>
             <button type="button" className="mt-1 h-8 text-[0.8125rem] text-muted-foreground hover:text-foreground">View all values</button>

@@ -224,6 +224,7 @@ const CompanySchema = z.object({
   email: z.string(),
   notes: z.string(),
   customer_since: z.string().nullable().optional().openapi({ description: "The day they became a customer (YYYY-MM-DD); null = not a customer. Set from the close date of their first won deal" }),
+  renewal_date: z.string().nullable().optional().openapi({ description: "The next renewal (YYYY-MM-DD); null = none. Within 30 days, or past, it shows on the Customers page" }),
   contact_count: z.number().int().optional(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -806,6 +807,7 @@ const updateCompany = createRoute({
         email: z.string().optional(),
         notes: z.string().optional(),
         customer_since: z.string().nullable().optional().openapi({ description: "YYYY-MM-DD makes the company a customer from that day; null or \"\" makes it not a customer" }),
+        renewal_date: z.string().nullable().optional().openapi({ description: "The next renewal as YYYY-MM-DD; null or \"\" clears it. Move it on after each renewal" }),
         custom: CustomValues,
       }).passthrough() } },
     },
@@ -845,6 +847,12 @@ app.openapi(updateCompany, async (c) => {
       const day = (body.customer_since ?? "").trim();
       if (day && !isDay(day)) return c.json({ error: "customer_since must be a date as YYYY-MM-DD" }, 400);
       fields.push("customer_since = ?");
+      params.push(day || null);
+    }
+    if (body.renewal_date !== undefined) {
+      const day = (body.renewal_date ?? "").trim();
+      if (day && !isDay(day)) return c.json({ error: "renewal_date must be a date as YYYY-MM-DD" }, 400);
+      fields.push("renewal_date = ?");
       params.push(day || null);
     }
 
@@ -2921,12 +2929,15 @@ app.openapi(insightDealRoute, async (c) => {
 
 // ── Customers ──
 
+const SyncStateSchema = z.enum(["seen", "off", "importing", "failing"]).openapi({ description: "seen: on and working; off; importing: the first import hasn't finished; failing: the latest run failed" });
+
 const CustomerSchema = z.object({
   id: z.string(),
   name: z.string(),
   domain: z.string(),
   customer_since: z.string(),
-  status: z.enum(["red", "yellow", "green"]),
+  renewal_date: z.string().nullable(),
+  status: z.enum(["red", "yellow", "green", "unknown"]).openapi({ description: "unknown: nothing against the account, but the CRM can't see whether anyone has been in touch (the reasons say why)" }),
   reasons: z.array(z.string()).openapi({ description: "Why the status, worst first. Empty when on track" }),
   last_touch_at: z.string().nullable().openapi({ description: "The latest call or email" }),
   days_quiet: z.number().int().nullable(),
@@ -2947,16 +2958,20 @@ const customersRoute = createRoute({
   path: "/api/customers",
   tags: ["Customers"],
   summary: "How each customer is doing (worst first), what to do first, and calls with customers in the next 7 days",
-  description: "A customer is a company with customer_since set. Red: one of our promises is overdue, the last call went badly, a risk is open, or no contact in 45 days. Yellow: no contact in 21 days, waiting on them, the mood dropped, or no contact yet.",
+  description: "A customer is a company with customer_since set. Red: one of our promises is overdue, the last call went badly, a risk is open, or no contact in 45 days. Yellow: no contact in 21 days, waiting on them, the mood dropped, a renewal within 30 days (or past), or no contact yet. Silence is judged only through what the CRM can see (calls when the meeting sync is on, emails when the email sync is on and has read the account's contacts), and the reason names what it can't see. Unknown: nothing else against the account and no channel to judge it by.",
   request: { query: z.object({ tz: z.string().optional().openapi({ description: "Viewer's UTC offset in minutes (e.g. 120), for what counts as overdue today" }) }) },
   responses: {
     200: {
       description: "Customers",
       content: { "application/json": { schema: z.object({
         customers: z.array(CustomerSchema),
-        focus: z.array(z.object({ kind: z.enum(["overdue", "reach_out", "due_today", "risk"]), company_id: z.string(), company_name: z.string(), text: z.string(), task_id: z.string().optional() })),
+        focus: z.array(z.object({ kind: z.enum(["overdue", "reach_out", "renewal", "due_today", "risk"]), company_id: z.string(), company_name: z.string(), text: z.string(), task_id: z.string().optional() })),
         upcoming: z.array(z.object({ id: z.string(), title: z.string(), starts_at: z.string(), company_id: z.string(), company_name: z.string(), company_domain: z.string(), ours_open: z.number().int(), last_summary: z.string().nullable() })),
-        counts: z.object({ red: z.number().int(), yellow: z.number().int(), green: z.number().int() }),
+        counts: z.object({ red: z.number().int(), yellow: z.number().int(), unknown: z.number().int(), green: z.number().int() }),
+        sight: z.object({
+          calls: SyncStateSchema.openapi({ description: "The meeting sync" }),
+          emails: SyncStateSchema.openapi({ description: "The email sync" }),
+        }).openapi({ description: "Whether the CRM can see calls and emails at all" }),
       }) } },
     },
     500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },

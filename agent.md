@@ -112,12 +112,20 @@ Transcripts stay in Granola. Meetings with only the team are never listed.
   `{ status: done|dismissed }`; `POST /api/insights/{id}/deal` turns an expansion
   into a deal at the first stage.
 - `GET /api/customers`: every company with `customer_since` set, worst first,
-  each with `status` (red/yellow/green) and the `reasons` in plain words; `focus`
-  (the few things to do first) and `upcoming` (calls with customers this week).
+  each with `status` (red/yellow/green, or `unknown` when nothing is against it
+  but the CRM can't see whether anyone has been in touch) and the `reasons` in
+  plain words; `focus` (the few things to do first) and `upcoming` (calls with
+  customers this week). Silence is only judged through what the CRM can see:
+  calls when the meeting sync is on, emails when the email sync is on and has
+  read that contact's history. `sight` says whether each sync is `seen`, `off`,
+  `importing` or `failing`, and a reason names what it can't see ("No contact in
+  30 days (calls aren't synced)"). Say that part too: never report an account
+  as quiet when the CRM can't see it.
   A company becomes a customer with `PUT /api/companies/{id}` `{ customer_since: "YYYY-MM-DD" }`,
   or from the close date of its first won deal (never later than today). A date
   already set stays: if a deal was marked won by mistake, clear `customer_since`
-  by hand.
+  by hand. `{ renewal_date: "YYYY-MM-DD" }` sets the next renewal: within 30 days
+  it shows as a reason and in `focus`, and once passed it asks for the next date.
 
 To answer "how is <customer> doing" or "what did we promise <company>", read
 these, and quote the reasons and the call's words rather than paraphrasing them.

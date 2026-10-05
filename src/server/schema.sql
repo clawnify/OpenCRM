@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS companies (
   -- hand, or from the close date of their first won deal. Customers are the
   -- accounts on the Customers page.
   customer_since TEXT,
+  -- The next renewal (YYYY-MM-DD), set by hand; NULL = none to watch. Within 30
+  -- days, or past, it shows on the Customers page.
+  renewal_date TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );

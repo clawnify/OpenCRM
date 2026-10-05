@@ -59,6 +59,8 @@ export interface Company {
   notes: string;
   /** The day they became a customer (YYYY-MM-DD); null = not a customer. */
   customer_since?: string | null;
+  /** The next renewal (YYYY-MM-DD); null = none to watch. */
+  renewal_date?: string | null;
   contact_count?: number;
   custom?: Record<string, unknown>; // write payload; on reads, values are flat columns
   relations?: Record<string, RelationValue>; // reads only, keyed by relation field
@@ -374,13 +376,18 @@ export interface Insight {
   updated_at: string;
 }
 
-export type HealthStatus = "red" | "yellow" | "green";
+/** unknown: nothing against the account, but the CRM can't see whether anyone has been in touch. */
+export type HealthStatus = "red" | "yellow" | "green" | "unknown";
+
+/** Whether a sync lets the CRM see a channel: on and working, off, still on its first import, or its latest run failed. */
+export type SyncState = "seen" | "off" | "importing" | "failing";
 
 export interface CustomerRow {
   id: string;
   name: string;
   domain: string;
   customer_since: string;
+  renewal_date: string | null;
   status: HealthStatus;
   reasons: string[];
   last_touch_at: string | null;
@@ -398,7 +405,7 @@ export interface CustomerRow {
 }
 
 export interface FocusItem {
-  kind: "overdue" | "reach_out" | "due_today" | "risk";
+  kind: "overdue" | "reach_out" | "renewal" | "due_today" | "risk";
   company_id: string;
   company_name: string;
   text: string;
@@ -421,4 +428,5 @@ export interface CustomersOverview {
   focus: FocusItem[];
   upcoming: UpcomingCall[];
   counts: Record<HealthStatus, number>;
+  sight: { calls: SyncState; emails: SyncState };
 }
