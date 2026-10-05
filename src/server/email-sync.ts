@@ -16,6 +16,7 @@ import type { ConnectionsEnv } from "@clawnify/connections";
 import { get, query, run } from "./db.js";
 import { mailConnection, type GoogleConnection } from "./integrations.js";
 import { workEmailDomain, findOrCreateCompanyByDomain, FREEMAIL_DOMAINS } from "./email-domains.js";
+import { bookableAt } from "./jobs.js";
 import {
   parseAddresses, isGroupAddress, isBlocked, normaliseBlocklist, creationCandidates, splitName,
   historyStart, sentQuery, receivedQuery, peopleQuery, sinceQuery,
@@ -522,10 +523,11 @@ type QueueEnv = { CLAWNIFY_TOKEN?: string; CLAWNIFY_QUEUE_URL?: string };
 /**
  * Books the next run on the platform queue. The key is the app's host, the
  * mailbox and the target minute, so two requests noticing the same gap book one
- * job. Unavailable queue (local dev, an outage) is not an error: the next page
- * load or "Sync now" books again.
+ * job; never for the current minute (see bookableAt). Unavailable queue (local
+ * dev, an outage) is not an error: the next page load or "Sync now" books again.
  */
-export async function scheduleRun(env: QueueEnv, origin: string, mailbox: string, runAt: Date): Promise<void> {
+export async function scheduleRun(env: QueueEnv, origin: string, mailbox: string, when: Date): Promise<void> {
+  const runAt = bookableAt(when);
   try {
     const { enqueueJob } = await import("@clawnify/queue");
     const job = await enqueueJob(env, {
