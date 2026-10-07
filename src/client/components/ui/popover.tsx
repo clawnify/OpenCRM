@@ -17,7 +17,8 @@ const PopoverContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         // DESIGN.md "popover": surface, rounded-md, hairline ring plus two soft drops.
-        "z-50 rounded-md bg-popover p-0 text-foreground shadow-[var(--shadow-popover)] outline-none",
+        // Padded by default (p-3) for free-form panels; a Command list or menu passes p-0.
+        "z-50 rounded-md bg-popover p-3 text-foreground shadow-[var(--shadow-popover)] outline-none",
         className,
       )}
       {...props}

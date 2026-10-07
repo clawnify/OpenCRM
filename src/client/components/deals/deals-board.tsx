@@ -297,7 +297,7 @@ function NewDealButton({ onCreate, trigger }: { onCreate: (name: string) => Prom
           </Button>
         )}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 p-3">
+      <PopoverContent align="end" className="w-72">
         <form onSubmit={submit} className="flex flex-col gap-2">
           <Label htmlFor="new-deal-name">Deal name</Label>
           <Input id="new-deal-name" autoFocus required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme renewal" />

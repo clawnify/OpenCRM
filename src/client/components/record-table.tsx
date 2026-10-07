@@ -296,6 +296,7 @@ function EditableCell<T extends { id: string }>({ column, edit, row, editing, on
         style={{ minWidth: size?.w, width: edit.type === "menu" ? Math.max(size?.w ?? 0, 256) : undefined }}
         onClick={(e) => e.stopPropagation()}
         onEscapeKeyDown={() => { cancelled.current = true; }}
+        className="p-0"
       >
         {edit.type === "text"
           ? <TextCellEditor initial={edit.value(row)} input={edit.input} height={size?.h} cancelled={cancelled} onSave={(v) => edit.save(row, v)} onDone={onDone} />
@@ -427,7 +428,7 @@ function AggregatePicker({ label, kind, op, value, onChange, alwaysShown = false
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" side="top" className="w-56">
+      <PopoverContent align="start" side="top" className="w-56 p-0">
         <Command>
           <CommandList>
             <CommandGroup>
@@ -475,7 +476,7 @@ function ColumnPicker<T>({ columns, view, onCustomize }: { columns: RecordColumn
           <Plus className="size-4" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64">
+      <PopoverContent align="end" className="w-64 p-0">
         <Command>
           <CommandInput placeholder="Search fields…" />
           <CommandList>

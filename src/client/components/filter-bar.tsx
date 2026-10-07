@@ -101,7 +101,7 @@ export function FilterBar({ leading, fields: baseFields, filters, onChange, isVi
                 <X className="size-3.5" />
               </button>
             </span>
-            <PopoverContent align="start" className="w-72">
+            <PopoverContent align="start" className="w-72 p-0">
               {field && <RuleEditor field={field} rule={n} onChange={(r) => replace(i, r)} />}
             </PopoverContent>
           </Popover>
@@ -121,7 +121,7 @@ export function FilterBar({ leading, fields: baseFields, filters, onChange, isVi
               <X className="size-3.5" />
             </button>
           </span>
-          <PopoverContent align="start" className="w-[44rem] max-w-[calc(100vw-2rem)] p-3">
+          <PopoverContent align="start" className="w-[44rem] max-w-[calc(100vw-2rem)]">
             <GroupEditor fields={fields} isVisible={isVisible} group={advanced} depth={0} onChange={(g) => replace(advancedIndex, g)} />
           </PopoverContent>
         </Popover>
@@ -146,7 +146,7 @@ export function FilterBar({ leading, fields: baseFields, filters, onChange, isVi
           </PopoverTrigger>
           <PopoverContent
             align="end"
-            className="w-72"
+            className="w-72 p-0"
             onCloseAutoFocus={(e) => { if (handoff.current) { e.preventDefault(); handoff.current = false; } }}
           >
             {open?.kind === "add" && open.editing !== undefined && addRule && addField ? (
@@ -195,7 +195,7 @@ function SaveAsView({ onSave }: { onSave: (name: string) => Promise<void> }) {
       <PopoverTrigger asChild>
         <Button size="sm" variant="secondary">Save as new view</Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64">
+      <PopoverContent align="end" className="w-64 p-0">
         <form onSubmit={submit} className="flex flex-col gap-2 p-2">
           <Input autoFocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="View name" aria-label="View name" className="h-8" />
           <p className="px-0.5 text-xs text-muted-foreground">Keeps these filters, sort and columns. Everyone in the org will see it.</p>
@@ -302,7 +302,7 @@ function Picker({ label, items, value, onPick, className }: {
           <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-56">
+      <PopoverContent align="start" className="w-56 p-0">
         <Command>
           {items.length > 8 && <CommandInput placeholder="Search…" />}
           <CommandList>
@@ -413,7 +413,7 @@ function InlineList({ label, children }: { label: string; children: ReactNode })
           <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-56">{children}</PopoverContent>
+      <PopoverContent align="start" className="w-56 p-0">{children}</PopoverContent>
     </Popover>
   );
 }
@@ -547,7 +547,7 @@ function RuleRow({ fields, isVisible, rule, onChange }: {
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-64">
+        <PopoverContent align="start" className="w-64 p-0">
           <FieldList fields={fields} isVisible={isVisible} onPick={(f) => { setOpen(false); onChange(newRule(f)); }} />
         </PopoverContent>
       </Popover>
