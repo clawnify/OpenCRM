@@ -420,6 +420,8 @@ export interface Sight {
 export interface AccountFacts {
   last_meeting_at: string | null;
   last_email_at: string | null;
+  /** The latest call, message, email or meeting someone (or an agent) logged by hand. */
+  last_logged_at?: string | null;
   next_meeting_at: string | null;
   /** Our open promises, due before today. */
   ours_overdue: Array<{ title: string; due_date: string }>;
@@ -482,6 +484,33 @@ export function sightGaps(v: Sight): { calls: boolean; emails: boolean; gaps: st
   return { calls: v.calls === "seen" || v.calls === "failing", emails, gaps };
 }
 
+/**
+ * How long an account has gone without a call or email the CRM saw, and the
+ * reason to give when that is longer than `quietDays`. Recent contact the CRM
+ * has seen settles it, whatever it can't see. Silence is claimed only through
+ * a channel it can see, naming the ones it can't. `judged`: whether contact can
+ * be judged at all.
+ */
+export function contactSilence(
+  f: { last_meeting_at: string | null; last_email_at: string | null; last_logged_at?: string | null; sight: Sight },
+  now: Date,
+  quietDays: number,
+): { touch: string | null; quiet: number | null; seen: ReturnType<typeof sightGaps>; judged: boolean; silence: string | null } {
+  // A touch logged by hand (a phone call, a message) is contact too: it can
+  // settle that there was recent contact, but its absence proves nothing.
+  const touch = later(later(f.last_meeting_at, f.last_email_at), f.last_logged_at ?? null);
+  const quiet = touch ? Math.max(0, Math.floor((now.getTime() - Date.parse(touch)) / 86_400_000)) : null;
+  const seen = sightGaps(f.sight);
+  const judged = seen.calls || seen.emails || (quiet !== null && quiet <= quietDays);
+  const unseen = seen.gaps.length ? ` (${seen.gaps.join(", ")})` : "";
+  let silence: string | null = null;
+  if (seen.calls || seen.emails) {
+    if (quiet === null) silence = `No ${seen.calls && seen.emails ? "calls or emails" : seen.calls ? "calls" : "emails"} yet${unseen}`;
+    else if (quiet > quietDays) silence = `No contact in ${quiet} days${unseen}`;
+  }
+  return { touch, quiet, seen, judged, silence };
+}
+
 /** Days from `today` (YYYY-MM-DD, the viewer's day) to `day`: negative when it has passed. Null when it isn't a day. */
 function daysUntil(day: string, today: string): number | null {
   const t = Date.parse(`${day.slice(0, 10)}T00:00:00Z`);
@@ -508,19 +537,7 @@ function daysUntil(day: string, today: string): number | null {
 export function health(f: AccountFacts, now: Date, today = now.toISOString().slice(0, 10)): AccountHealth {
   const red: string[] = [];
   const yellow: string[] = [];
-  const touch = later(f.last_meeting_at, f.last_email_at);
-  const quiet = touch ? Math.max(0, Math.floor((now.getTime() - Date.parse(touch)) / 86_400_000)) : null;
-
-  // Recent contact the CRM has seen settles it, whatever it can't see. Silence
-  // is claimed only through a channel it can see, naming the ones it can't.
-  const seen = sightGaps(f.sight);
-  const judged = seen.calls || seen.emails || (quiet !== null && quiet <= QUIET_YELLOW_DAYS);
-  const unseen = seen.gaps.length ? ` (${seen.gaps.join(", ")})` : "";
-  let silence: string | null = null;
-  if (seen.calls || seen.emails) {
-    if (quiet === null) silence = `No ${seen.calls && seen.emails ? "calls or emails" : seen.calls ? "calls" : "emails"} yet${unseen}`;
-    else if (quiet > QUIET_YELLOW_DAYS) silence = `No contact in ${quiet} days${unseen}`;
-  }
+  const { touch, quiet, seen, judged, silence } = contactSilence(f, now, QUIET_YELLOW_DAYS);
 
   if (f.ours_overdue.length === 1) red.push(`Overdue: ${f.ours_overdue[0].title} (due ${shortDay(f.ours_overdue[0].due_date)})`);
   else if (f.ours_overdue.length > 1) red.push(`${f.ours_overdue.length} of our promises are overdue`);
@@ -594,4 +611,129 @@ export function focus(accounts: FocusAccount[], limit = 3, today = new Date().to
   for (const a of accounts) for (const t of a.ours_due_today) out.push({ kind: "due_today", company_id: a.id, company_name: a.name, text: t.title, task_id: t.id });
   for (const a of accounts) for (const r of a.risks) out.push({ kind: "risk", company_id: a.id, company_name: a.name, text: r });
   return out.slice(0, limit);
+}
+
+// ── How an open deal is moving ─────────────────────────────────────
+
+// shortcut: one threshold for every workspace. No operator post at the 20-like
+// bar gives a number (docs research, 2026-10-06); make it a setting if teams ask.
+/** No call or email on an open deal for this long is worth a word: deals cool in weeks, not months. */
+export const DEAL_QUIET_DAYS = 14;
+
+export interface NextStep {
+  kind: "meeting" | "task";
+  title: string;
+  /** The meeting's start (ISO) or the task's due day (YYYY-MM-DD). */
+  at: string;
+  /** Who owes a task; null for a meeting. */
+  owed_by: OwedBy | null;
+  /** A task whose day has passed. */
+  overdue: boolean;
+}
+
+export interface DealFacts {
+  last_meeting_at: string | null;
+  last_email_at: string | null;
+  /** The latest call, message, email or meeting logged by hand on the deal or its company. */
+  last_logged_at?: string | null;
+  sight: Sight;
+  /** The next meeting booked with the deal's company; `day` is its date where the viewer is. */
+  next_meeting: { title: string; starts_at: string; day: string } | null;
+  /** Open tasks on the deal, and its company's tasks on no deal. Undated ones are never a next step. */
+  tasks: Array<{ title: string; due_date: string | null; owed_by: OwedBy }>;
+  /** Moods of the company's last digested calls, newest first. */
+  sentiments: Array<{ value: number; reason: string | null }>;
+  /** Open risks noted in the company's calls. */
+  risks: string[];
+  close_date: string | null;
+  /** No company on the deal, so no call or email can be matched to it. */
+  no_company?: boolean;
+}
+
+export interface DealProgress {
+  status: Health;
+  reasons: string[];
+  next_step: NextStep | null;
+  last_touch_at: string | null;
+  days_quiet: number | null;
+}
+
+/**
+ * A deal's next step: the soonest of the next meeting booked with its company
+ * and its open tasks with a date, ours or theirs. An overdue task is the
+ * soonest of all; a task due the day of the meeting yields to the meeting. A
+ * task without a date is not a next step: nobody agreed when.
+ */
+export function nextStep(f: Pick<DealFacts, "next_meeting" | "tasks">, today: string): NextStep | null {
+  const task = f.tasks
+    .filter((t): t is typeof t & { due_date: string } => !!t.due_date)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
+  if (task && (!f.next_meeting || task.due_date < f.next_meeting.day)) {
+    return { kind: "task", title: task.title, at: task.due_date, owed_by: task.owed_by, overdue: task.due_date < today };
+  }
+  if (f.next_meeting) return { kind: "meeting", title: f.next_meeting.title, at: f.next_meeting.starts_at, owed_by: null, overdue: false };
+  return null;
+}
+
+const CALLS_GAP: Partial<Record<SyncState, string>> = {
+  off: "calls aren't synced",
+  importing: "calls are still importing",
+  failing: "the meeting sync is failing",
+};
+
+/**
+ * How an open deal is moving. Red when one of our promises is overdue, the
+ * last call went badly, a risk is open, or there is no next step and nobody
+ * has been in touch for DEAL_QUIET_DAYS. Yellow when there is no next step, no
+ * contact for DEAL_QUIET_DAYS, they owe something overdue, the close date has
+ * passed, or the mood dropped since the call before. Silence is judged as for
+ * customers, only through what the CRM can see (contactSilence).
+ */
+export function dealHealth(f: DealFacts, now: Date, today = now.toISOString().slice(0, 10)): DealProgress {
+  const red: string[] = [];
+  const yellow: string[] = [];
+  // With no company, no call or email can be matched to the deal: silence is never judged.
+  const { touch, quiet, seen, judged, silence } = f.no_company
+    ? { touch: null, quiet: null, seen: sightGaps(f.sight), judged: false, silence: null }
+    : contactSilence(f, now, DEAL_QUIET_DAYS);
+  const step = nextStep(f, today);
+  const overdue = (by: OwedBy) => f.tasks
+    .filter((t): t is typeof t & { due_date: string } => t.owed_by === by && !!t.due_date && t.due_date < today)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date));
+  const ours = overdue("us");
+  const theirs = overdue("them");
+
+  if (ours.length === 1) red.push(`Overdue: ${ours[0].title} (due ${shortDay(ours[0].due_date)})`);
+  else if (ours.length > 1) red.push(`${ours.length} of our promises are overdue`);
+  const [mood, before] = f.sentiments;
+  if (mood && mood.value <= -1) red.push(mood.reason ? `Last call went badly: ${mood.reason}` : "Last call went badly");
+  if (f.risks.length) red.push(`Risk: ${f.risks[0]}${f.risks.length > 1 ? ` (and ${f.risks.length - 1} more)` : ""}`);
+
+  if (!step) {
+    if (silence && quiet !== null && quiet > DEAL_QUIET_DAYS) red.push(`No next step, and ${silence.charAt(0).toLowerCase()}${silence.slice(1)}`);
+    else {
+      // A booked call can only count when the CRM sees the calendar.
+      const gap = CALLS_GAP[f.sight.calls];
+      yellow.push(`No next step${gap && !f.no_company ? ` (${gap})` : ""}`);
+      if (silence) yellow.push(silence);
+    }
+  } else if (silence) yellow.push(silence);
+  if (theirs.length) yellow.push(`Waiting on them: ${theirs[0].title}${theirs.length > 1 ? ` (and ${theirs.length - 1} more)` : ""}`);
+  const closes = f.close_date ? daysUntil(f.close_date, today) : null;
+  if (closes !== null && closes < 0) yellow.push(`The close date (${shortDay(f.close_date!)}) has passed: move it or close the deal`);
+  if (mood && before && mood.value < before.value && mood.value <= 0 && mood.value > -1) yellow.push("The mood dropped since the call before");
+
+  const reasons = [...red, ...yellow];
+  if (f.no_company) reasons.push("No company on this deal, so its calls and emails can't be matched");
+  else if (!judged) {
+    const why = seen.gaps.join(", ");
+    reasons.push(`${why.charAt(0).toUpperCase()}${why.slice(1)}`);
+  }
+  return {
+    status: red.length ? "red" : yellow.length ? "yellow" : judged && !f.no_company ? "green" : "unknown",
+    reasons,
+    next_step: step,
+    last_touch_at: touch,
+    days_quiet: quiet,
+  };
 }

@@ -15,19 +15,21 @@ const OWED: Record<OwedBy, string> = { us: "We owe", them: "They owe" };
  * A company's tasks: what we promised and what we're waiting on, typed here or
  * taken from its calls. Open ones by due date; done ones on request. Each value
  * is the control (title and due date edit in place, the chip flips who owes it).
+ * With `dealId`, a deal's: its own tasks and its company's on no deal, and a
+ * new one is the deal's (a task with a date is a next step).
  */
-export function TasksSection({ companyId, onCount }: { companyId: string; onCount?: (n: number) => void }) {
+export function TasksSection({ companyId, dealId, onCount }: { companyId: string | null; dealId?: string; onCount?: (n: number) => void }) {
   const { setError, changes } = useCrm();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [draft, setDraft] = useState("");
 
   const load = () =>
-    api<{ tasks: Task[] }>("GET", `/api/tasks?company_id=${encodeURIComponent(companyId)}&status=${showDone ? "all" : "open"}&limit=200`)
+    api<{ tasks: Task[] }>("GET", `/api/tasks?${dealId ? `deal_id=${encodeURIComponent(dealId)}` : `company_id=${encodeURIComponent(companyId ?? "")}`}&status=${showDone ? "all" : "open"}&limit=200`)
       .then((r) => setTasks(r.tasks), (e) => setError(e instanceof Error ? e.message : "Could not load tasks"));
 
   const seen = useRef(changes);
-  useEffect(() => { void load(); }, [companyId, showDone]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(); }, [companyId, dealId, showDone]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (seen.current === changes) return;
     seen.current = changes;
@@ -58,7 +60,7 @@ export function TasksSection({ companyId, onCount }: { companyId: string; onCoun
     if (!title) return;
     setDraft("");
     try {
-      const r = await api<{ task: Task }>("POST", "/api/tasks", { title, company_id: companyId });
+      const r = await api<{ task: Task }>("POST", "/api/tasks", { title, company_id: companyId, ...(dealId ? { deal_id: dealId } : {}) });
       setTasks((list) => [...(list ?? []), r.task]);
     } catch (e) {
       setDraft(title);

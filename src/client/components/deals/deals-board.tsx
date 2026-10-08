@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Plus, Pencil, Trash2, MoreHorizontal, ArrowRightLeft, CircleDollarSign, CalendarDays, Building2, UserRound, HeartHandshake, NotebookText, Clock3, type LucideIcon } from "lucide-react";
+import { Plus, Pencil, Trash2, MoreHorizontal, ArrowRightLeft, CircleDollarSign, CalendarDays, Building2, UserRound, HeartHandshake, NotebookText, Clock3, Footprints, type LucideIcon } from "lucide-react";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { useCrm } from "@/context";
 import { PageHeader, Avatar, EntityIcon, EmptyState } from "@/components/shared";
@@ -17,6 +17,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { withQuery } from "@/hooks/use-router";
 import { api } from "@/api";
 import { formatMoney, formatDate, daysSince, colorClasses, cn } from "@/lib/utils";
+import { NextStepLine } from "@/components/deals/next-step";
+import { DealsViewSwitch } from "@/components/deals/deals-view-switch";
 import { fieldsFromDefs } from "@/lib/filters";
 import type { Deal, StageDef } from "@/types";
 
@@ -113,6 +115,7 @@ export function DealsBoard({ navigate, openId }: { navigate: (to: string, opts?:
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <PageHeader title="Deals" count={stats.deals}>
+        <DealsViewSwitch view="board" navigate={navigate} />
         <div className="flex flex-col items-end">
           <div className="section-label">Pipeline value</div>
           <span className="tabular text-sm font-semibold">{formatMoney(dealsTotalValue)}</span>
@@ -396,6 +399,11 @@ function DealFields({ deal: d }: { deal: Deal }) {
   const note = (d.notes ?? "").split("\n")[0].trim();
   return (
     <dl className="flex flex-col text-sm">
+      {d.progress && (
+        <FieldRow icon={Footprints} label="Next step">
+          <NextStepLine progress={d.progress} icon={false} compact className="text-sm" />
+        </FieldRow>
+      )}
       <FieldRow icon={CalendarDays} label="Close date">
         {d.close_date ? formatDate(d.close_date) : null}
       </FieldRow>

@@ -12,6 +12,7 @@ import { ContactDetail } from "./components/contacts/contact-detail";
 import { CompaniesPage } from "./components/companies/companies-page";
 import { CompanyDetail } from "./components/companies/company-detail";
 import { DealsBoard } from "./components/deals/deals-board";
+import { DealsProgressPage } from "./components/deals/deals-progress-page";
 import { DealDetail } from "./components/deals/deal-detail";
 import { PropertiesPage } from "./components/properties/properties-page";
 import { EmailSyncPage } from "./components/email-sync/email-sync-page";
@@ -131,7 +132,9 @@ export function App() {
               {route.name === "company" && <CompanyDetail id={route.id} navigate={navigate} />}
               {route.name === "deals" && (
                 <div className="flex min-h-0 flex-1">
-                  <DealsBoard navigate={navigate} openId={openRecord} />
+                  {route.view === "next-steps"
+                    ? <DealsProgressPage navigate={navigate} openId={openRecord} />
+                    : <DealsBoard navigate={navigate} openId={openRecord} />}
                   {openRecord && (
                     <RecordPanel label="Deal">
                       <RecordPanelHeader icon={Handshake} label="Deal" onExpand={() => navigate(`/deals/${encodeURIComponent(openRecord)}`)} onClose={() => navigate(withQuery({ record: null }))} />

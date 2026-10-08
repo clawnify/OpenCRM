@@ -8,7 +8,16 @@ import { RecordTopBar, Attr, DetailsSection, Tile, RecordTabs, FutureSection, As
 import { RelationAttrs, RelationSections } from "@/components/record-relations";
 import { RecordChip, RelationInput } from "@/lib/relations";
 import { formatMoney, colorClasses, cn } from "@/lib/utils";
+import { HealthPill, daysAgo } from "@/components/meetings/shared";
+import { MeetingsSection } from "@/components/meetings/meetings-section";
+import { TasksSection } from "@/components/tasks/tasks-section";
+import { NextStepLine } from "@/components/deals/next-step";
 import type { Deal, Activity, RelationRecord, StageDef } from "@/types";
+
+/** How a timeline entry reads: what kind of contact it was, when it was logged by hand or by an agent. */
+const ACTIVITY_KIND: Record<string, string> = {
+  call: "Call", message: "Message", email: "Email", meeting: "Meeting", note: "Note", stage_change: "Stage",
+};
 
 function formatTimestamp(createdAt: string): string {
   const d = new Date(createdAt.replace(" ", "T") + "Z");
@@ -148,6 +157,27 @@ export function DealDetail({ id, navigate, panel = false }: { id: string; naviga
           ]} />}
 
           <div className={cn("flex flex-col gap-8", panel ? "p-4" : "p-6")}>
+            {deal.progress && (
+              <section className="flex flex-col gap-3" aria-label="Next step">
+                <h2 className="text-sm font-medium">Next step</h2>
+                <div className="flex flex-col gap-2 rounded-md bg-card p-3.5 shadow-edge">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <HealthPill status={deal.progress.status} />
+                    <NextStepLine progress={deal.progress} className="text-sm" />
+                    <span className="ml-auto text-[0.8125rem] text-muted-foreground">Last contact {daysAgo(deal.progress.days_quiet).toLowerCase()}</span>
+                  </div>
+                  {deal.progress.reasons.length > 0 && (
+                    <ul className="flex flex-col gap-0.5 text-[0.8125rem] text-muted-foreground">
+                      {deal.progress.reasons.map((r) => <li key={r}>{r}</li>)}
+                    </ul>
+                  )}
+                  {!deal.progress.next_step && (
+                    <p className="text-[0.8125rem] text-muted-foreground">Book a call with them, or add a task with a date below.</p>
+                  )}
+                </div>
+              </section>
+            )}
+
             {!panel && (
               <section className="flex flex-col gap-3">
                 <h2 className="text-sm font-medium">Highlights</h2>
@@ -162,6 +192,17 @@ export function DealDetail({ id, navigate, panel = false }: { id: string; naviga
               </section>
             )}
 
+            <TasksSection companyId={deal.company_id} dealId={deal.id} />
+
+            {deal.company_id ? (
+              <MeetingsSection companyId={deal.company_id} />
+            ) : (
+              <section className="flex flex-col gap-2">
+                <h2 className="text-sm font-medium">Calls</h2>
+                <p className="text-sm text-faint">Set the deal's company to see the calls with it.</p>
+              </section>
+            )}
+
             <section className="flex flex-col gap-3">
               <h2 className="text-sm font-medium">Activity</h2>
               {recent.length === 0 ? (
@@ -171,7 +212,10 @@ export function DealDetail({ id, navigate, panel = false }: { id: string; naviga
                   {recent.slice(0, 6).map((a) => (
                     <li key={a.id} className="flex items-start gap-3 px-3.5 py-2.5 [&+li]:border-t [&+li]:border-border">
                       <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground"><ActivityIcon className="size-3" /></span>
-                      <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm">{a.body}</p>
+                      <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm">
+                        {ACTIVITY_KIND[a.type] && a.type !== "note" && <span className="font-medium">{ACTIVITY_KIND[a.type]}: </span>}
+                        {a.body}
+                      </p>
                       <span className="shrink-0 tabular text-xs text-muted-foreground">{formatTimestamp(a.created_at)}</span>
                     </li>
                   ))}

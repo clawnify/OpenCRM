@@ -154,6 +154,8 @@ export interface Deal {
   contact_last_name?: string | null;
   company_name?: string | null;
   company_domain?: string | null;
+  /** How an open deal is moving (board and single-deal reads); null when won or lost. */
+  progress?: DealProgress | null;
   custom?: Record<string, unknown>; // write payload; on reads, values are flat columns
   relations?: Record<string, RelationValue>; // reads only, keyed by relation field
   created_at: string;
@@ -427,6 +429,32 @@ export interface CustomersOverview {
   customers: CustomerRow[];
   focus: FocusItem[];
   upcoming: UpcomingCall[];
+  counts: Record<HealthStatus, number>;
+  sight: { calls: SyncState; emails: SyncState };
+}
+
+/** What happens next on a deal: the next call booked with its company, or its soonest dated task. */
+export interface NextStep {
+  kind: "meeting" | "task";
+  title: string;
+  /** The meeting's start (ISO 8601) or the task's due day (YYYY-MM-DD). */
+  at: string;
+  owed_by: OwedBy | null;
+  overdue: boolean;
+}
+
+export interface DealProgress {
+  status: HealthStatus;
+  /** Why, worst first, in plain words; empty when on track. */
+  reasons: string[];
+  next_step: NextStep | null;
+  last_touch_at: string | null;
+  days_quiet: number | null;
+}
+
+export interface DealsProgressOverview {
+  deals: Deal[];
+  total: number;
   counts: Record<HealthStatus, number>;
   sight: { calls: SyncState; emails: SyncState };
 }
