@@ -218,7 +218,8 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
 
   const fetchDeal = useCallback(async (id: string): Promise<Deal | null> => {
     try {
-      const data = await api<{ deal: Deal }>("GET", `/api/deals/${encodeURIComponent(id)}`);
+      // The viewer's offset, so "overdue" and "today" in its progress are their day.
+      const data = await api<{ deal: Deal }>("GET", `/api/deals/${encodeURIComponent(id)}?tz=${-new Date().getTimezoneOffset()}`);
       return data.deal;
     } catch {
       return null;

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn, toIsoDate } from "@/lib/utils";
-import type { HealthStatus } from "@/types";
+import type { HealthStatus, SyncState } from "@/types";
 
 type Tone = "success" | "warning" | "danger" | "neutral";
 
@@ -88,4 +88,20 @@ export function daysAgo(days: number | null): string {
 /** An eyebrow: the 11px uppercase label that names a zone (DESIGN.md signature 1). */
 export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
   return <h2 className={cn("text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground", className)}>{children}</h2>;
+}
+
+const CHANNELS = [
+  { key: "calls", off: "calls aren't synced", importing: "calls are still importing", failing: "the meeting sync is failing", href: "/settings/meetings", setup: "Set up meetings", open: "Meeting settings" },
+  { key: "emails", off: "email isn't synced", importing: "email is still importing", failing: "the email sync is failing", href: "/settings/email", setup: "Set up email", open: "Email settings" },
+] as const;
+
+/** What the CRM can't see, as one sentence, and where to fix each part; null when it sees both. `of`: whose contact it is ("customers", "deals"). */
+export function sightNotice(sight: { calls: SyncState; emails: SyncState }, of: string) {
+  const gaps = CHANNELS.flatMap((ch) => {
+    const state: SyncState = sight[ch.key];
+    return state === "seen" ? [] : [{ text: ch[state], href: ch.href, label: state === "off" ? ch.setup : ch.open }];
+  });
+  if (!gaps.length) return null;
+  const said = gaps.map((g) => g.text).join(" and ");
+  return { text: `${said.charAt(0).toUpperCase()}${said.slice(1)}, so the CRM can't see all your contact with ${of}.`, links: gaps };
 }

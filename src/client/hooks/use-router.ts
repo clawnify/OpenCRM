@@ -11,7 +11,7 @@ export type Route =
   | { name: "contact"; id: string }
   | { name: "companies"; record?: string; view?: string; filters?: string }
   | { name: "company"; id: string }
-  | { name: "deals"; record?: string }
+  | { name: "deals"; record?: string; view?: string }
   | { name: "deal"; id: string }
   | { name: "customers" }
   | { name: "properties" }
@@ -30,7 +30,7 @@ function parse(pathname: string, search: string): Route {
   if (pathname === "/companies") return { name: "companies", record, view, filters };
   const cm = pathname.match(/^\/companies\/([^/]+)$/);
   if (cm) return { name: "company", id: decodeURIComponent(cm[1]) };
-  if (pathname === "/deals") return { name: "deals", record };
+  if (pathname === "/deals") return { name: "deals", record, view };
   const dm = pathname.match(/^\/deals\/([^/]+)$/);
   if (dm) return { name: "deal", id: decodeURIComponent(dm[1]) };
   if (pathname === "/customers") return { name: "customers" };

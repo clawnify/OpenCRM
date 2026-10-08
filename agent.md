@@ -132,6 +132,40 @@ these, and quote the reasons and the call's words rather than paraphrasing them.
 Turning the sync on or off, and what it reads, is a person's decision made in
 Settings → Meetings; you can run it (`POST /api/meetings/sync-now`).
 
+## Deals: next steps and updates
+
+Every open deal (stage neither won nor lost) has a next step: the soonest of the
+next call booked with its company and its open tasks with a date, ours or
+theirs. A task without a date is not a next step.
+
+- `GET /api/deals/progress`: open deals, worst first, each with `progress`:
+  `status` (red/yellow/green/unknown), the `reasons` in plain words, `next_step`,
+  and `days_quiet`. `GET /api/deals/{id}` and the board carry `progress` too.
+  Red: one of our promises is overdue, the last call went badly, a risk is
+  open, or no next step and no contact in 14 days. Yellow: no next step, no
+  contact in 14 days, waiting on them, or the close date has passed. As for
+  customers, silence is only judged through what the CRM can see: say so.
+- `GET /api/tasks?deal_id=`: the deal's tasks, and its company's on no deal.
+
+When the user tells you what happened on a deal (a phone call, a WhatsApp or
+text message, an email from an inbox the CRM doesn't read, a meeting moved or
+held in person), log it in one call:
+`POST /api/deals/{id}/updates`
+`{ kind: call|message|email|meeting|note, summary, at?, done_task_ids?, next_step?: { title, due_date, owed_by }, close_date? }`.
+
+- `at` is when it happened (ISO 8601 or `YYYY-MM-DD`), never in the future: what
+  will happen goes in `next_step`, with the date agreed and who owes it.
+- Read the deal's open tasks first, and put the ones this update finished in
+  `done_task_ids` ("they sent the contract" closes "Signed contract").
+- Find the deal through its company: `GET /api/companies?search=<name>`, then
+  `GET /api/deals?company_id=<id>` (`search` on deals matches only a deal's name
+  and notes). Ask when two deals could match; never log an update on a guess.
+- Don't log what the CRM already reads: calendar meetings and Gmail are synced
+  when `GET /api/integrations/status` says so, and a moved meeting updates on
+  its own there.
+- Next steps are this CRM's tasks, not your own task list. Move the stage with
+  `PUT /api/deals/{id}` `{ stage }`.
+
 ## Import contacts (CSV / XLSX)
 
 Users import via the dashboard UI (Contacts → **Import**): upload a CSV/XLSX, map

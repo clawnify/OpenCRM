@@ -5,9 +5,9 @@ import { api } from "@/api";
 import { EntityIcon, EmptyState, PageHeader } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Eyebrow, HEALTH, HealthPill, StatusPill, daysAgo, meetingWhen, tzOffset } from "@/components/meetings/shared";
+import { Eyebrow, HEALTH, HealthPill, StatusPill, daysAgo, meetingWhen, sightNotice, tzOffset } from "@/components/meetings/shared";
 import { cn, formatDate } from "@/lib/utils";
-import type { CustomersOverview, FocusItem, MeetingSyncStatus, SyncState } from "@/types";
+import type { CustomersOverview, FocusItem, MeetingSyncStatus } from "@/types";
 
 const FOCUS_ICON: Record<FocusItem["kind"], typeof AlarmClock> = {
   overdue: AlarmClock,
@@ -16,22 +16,6 @@ const FOCUS_ICON: Record<FocusItem["kind"], typeof AlarmClock> = {
   renewal: CalendarClock,
   risk: TriangleAlert,
 };
-
-const CHANNELS = [
-  { key: "calls", off: "calls aren't synced", importing: "calls are still importing", failing: "the meeting sync is failing", href: "/settings/meetings", setup: "Set up meetings", open: "Meeting settings" },
-  { key: "emails", off: "email isn't synced", importing: "email is still importing", failing: "the email sync is failing", href: "/settings/email", setup: "Set up email", open: "Email settings" },
-] as const;
-
-/** What the CRM can't see, as one sentence, and where to fix each part; null when it sees both. */
-function sightNotice(sight: CustomersOverview["sight"]) {
-  const gaps = CHANNELS.flatMap((ch) => {
-    const state: SyncState = sight[ch.key];
-    return state === "seen" ? [] : [{ text: ch[state], href: ch.href, label: state === "off" ? ch.setup : ch.open }];
-  });
-  if (!gaps.length) return null;
-  const said = gaps.map((g) => g.text).join(" and ");
-  return { text: `${said.charAt(0).toUpperCase()}${said.slice(1)}, so the CRM can't see all your contact with customers.`, links: gaps };
-}
 
 /**
  * Customers: how each account is doing, worst first, with the reasons in plain
@@ -75,7 +59,7 @@ export function CustomersPage({ navigate }: { navigate: (to: string) => void }) 
   };
 
   const open = (id: string) => navigate(`/companies/${encodeURIComponent(id)}`);
-  const notice = data ? sightNotice(data.sight) : null;
+  const notice = data ? sightNotice(data.sight, "customers") : null;
 
   if (!data) {
     return (

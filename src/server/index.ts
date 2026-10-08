@@ -36,6 +36,7 @@ import {
   HISTORY_DAYS, LIVE_INTERVAL_MS as MEETINGS_INTERVAL_MS, type MeetingSync,
 } from "./meetings.js";
 import { customersOverview } from "./customers.js";
+import { dealsProgress, SEVERITY, type ProgressDeal } from "./deal-progress.js";
 import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, countSQL, countOf, type ManyLink } from "./relations.js";
 
 // In production Clawnify injects the CREDENTIALS broker binding + CLAWNIFY_ORG_ID
@@ -246,6 +247,24 @@ const ContactSchema = z.object({
   updated_at: z.string(),
 }).openapi("Contact");
 
+const SyncStateSchema = z.enum(["seen", "off", "importing", "failing"]).openapi({ description: "seen: on and working; off; importing: the first import hasn't finished; failing: the latest run failed" });
+
+const NextStepSchema = z.object({
+  kind: z.enum(["meeting", "task"]),
+  title: z.string(),
+  at: z.string().openapi({ description: "The meeting's start (ISO 8601) or the task's due day (YYYY-MM-DD)" }),
+  owed_by: z.enum(["us", "them"]).nullable().openapi({ description: "Who owes a task; null for a meeting" }),
+  overdue: z.boolean(),
+}).openapi("NextStep");
+
+const DealProgressSchema = z.object({
+  status: z.enum(["red", "yellow", "green", "unknown"]),
+  reasons: z.array(z.string()).openapi({ description: "Why, worst first, in plain words. Empty when on track." }),
+  next_step: NextStepSchema.nullable().openapi({ description: "The soonest of the next meeting booked with the deal's company and its open tasks with a date. Null: nobody agreed on what happens next." }),
+  last_touch_at: z.string().nullable().openapi({ description: "The latest call, email or logged touch with the deal's company" }),
+  days_quiet: z.number().int().nullable(),
+}).openapi("DealProgress");
+
 const DealSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -259,6 +278,7 @@ const DealSchema = z.object({
   contact_last_name: z.string().nullable().optional(),
   company_name: z.string().nullable().optional(),
   company_domain: z.string().nullable().optional(),
+  progress: DealProgressSchema.nullable().optional().openapi({ description: "How an open deal is moving (board and single-deal reads). Null for a won or lost deal." }),
   created_at: z.string(),
   updated_at: z.string(),
 }).openapi("Deal");
@@ -1329,6 +1349,12 @@ async function getStageRow(key: string): Promise<StageRow | undefined> {
   return get<StageRow>("SELECT * FROM stages WHERE key = ?", [key]);
 }
 
+/** Each open deal's progress (deal-progress.ts), with the default stages in place first: on a new database they are what says which deals are closed. */
+async function progressOf(...args: Parameters<typeof dealsProgress>): ReturnType<typeof dealsProgress> {
+  await ensureStagesSeeded();
+  return dealsProgress(...args);
+}
+
 /** 400 body for an unknown stage key on a deal write. */
 async function unknownStageError(key: string): Promise<{ error: string }> {
   const valid = (await listStagesRows()).map((s) => s.key).join(", ");
@@ -1626,9 +1652,59 @@ app.openapi(getDealsBoard, async (c) => {
     const flt = buildFilters(await tableColumns("deals"), q.filters, "d.", tzOffsetOf(q.tz), await manyLinks("deal"));
     const whereSQL = flt.clauses.length ? " WHERE " + flt.clauses.join(" AND ") : "";
     const rows = await query(DEAL_SELECT + whereSQL + " ORDER BY d.created_at ASC", flt.params);
-    return c.json({ deals: await withRelations("deal", rows as Record<string, unknown>[]) }, 200);
+    const deals = await withRelations("deal", rows as Record<string, unknown>[]);
+    const { progress } = await progressOf(deals as unknown as ProgressDeal[], new Date(), tzOffsetOf(q.tz));
+    return c.json({ deals: deals.map((d) => ({ ...d, progress: progress.get(String(d.id)) ?? null })) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
+  }
+});
+
+const dealsProgressRoute = createRoute({
+  method: "get",
+  path: "/api/deals/progress",
+  tags: ["Deals"],
+  summary: "Open deals, worst first: each one's next step and the reasons to look at it",
+  description: "An open deal is one whose stage is neither won nor lost. Its next step is the soonest of the next meeting booked with its company and its open tasks with a date (ours or theirs). Red: one of our promises is overdue, the last call went badly, a risk is open, or no next step and no contact in 14 days. Yellow: no next step, no contact in 14 days, waiting on them, the close date has passed, or the mood dropped. Contact is a call, an email, or a call, message, email or meeting logged on the deal, its company or its contacts; silence is judged only through what the CRM can see, and the reason says what it can't. Unknown: nothing against the deal and no way to judge contact.",
+  request: {
+    query: z.object({
+      tz: z.string().optional().openapi({ description: "Viewer's UTC offset in minutes (e.g. 120), for what counts as overdue today" }),
+      limit: z.string().optional().openapi({ description: "Default 100, max 500" }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Open deals, worst first, then the biggest",
+      content: { "application/json": { schema: z.object({
+        deals: z.array(DealSchema),
+        total: z.number().int(),
+        counts: z.object({ red: z.number().int(), yellow: z.number().int(), unknown: z.number().int(), green: z.number().int() }),
+        sight: z.object({ calls: SyncStateSchema, emails: SyncStateSchema }).openapi({ description: "Whether the CRM can see calls and emails at all" }),
+      }) } },
+    },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(dealsProgressRoute, async (c) => {
+  try {
+    const q = c.req.valid("query");
+    await backfillDealCompanies();
+    const rows = await query<Record<string, unknown> & { id: string; name: string; value: number }>(DEAL_SELECT + " ORDER BY d.created_at ASC");
+    const { progress, sight } = await progressOf(rows as unknown as ProgressDeal[], new Date(), tzOffsetOf(q.tz));
+    const open = rows
+      .filter((d) => progress.has(String(d.id)))
+      .map((d) => ({ ...d, progress: progress.get(String(d.id))! }))
+      .sort((a, b) => SEVERITY[a.progress.status] - SEVERITY[b.progress.status]
+        || (Number(b.value) || 0) - (Number(a.value) || 0)
+        || String(a.name).localeCompare(String(b.name)));
+    const counts = { red: 0, yellow: 0, unknown: 0, green: 0 };
+    for (const d of open) counts[d.progress.status]++;
+    const limit = Math.min(500, Math.max(1, parseInt(q.limit || "100", 10) || 100));
+    const deals = await withRelations("deal", open.slice(0, limit));
+    return c.json({ deals: deals as unknown as z.infer<typeof DealSchema>[], total: open.length, counts, sight }, 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
   }
 });
 
@@ -2671,6 +2747,7 @@ const listTasksRoute = createRoute({
   request: {
     query: z.object({
       company_id: z.string().optional(),
+      deal_id: z.string().optional().openapi({ description: "One deal's tasks: its own, and its company's that are on no deal" }),
       status: z.enum(["open", "done", "all"]).optional().openapi({ description: "Default open" }),
       owed_by: z.enum(["us", "them"]).optional(),
       limit: z.string().optional().openapi({ description: "Default 50, max 200" }),
@@ -2691,6 +2768,12 @@ app.openapi(listTasksRoute, async (c) => {
     if (status === "open") where.push("t.done_at IS NULL");
     if (status === "done") where.push("t.done_at IS NOT NULL");
     if (q.company_id) { where.push("t.company_id = ?"); params.push(q.company_id); }
+    if (q.deal_id) {
+      // The deal's own tasks, and its company's (its own, else its contact's) on no deal.
+      where.push(`(t.deal_id = ? OR (t.deal_id IS NULL AND t.company_id = (
+        SELECT COALESCE(d.company_id, ct.company_id) FROM deals d LEFT JOIN contacts ct ON ct.id = d.contact_id WHERE d.id = ?)))`);
+      params.push(q.deal_id, q.deal_id);
+    }
     if (q.owed_by) { where.push("t.owed_by = ?"); params.push(q.owed_by); }
     const limit = Math.min(200, Math.max(1, parseInt(q.limit || "50", 10) || 50));
     const rows = await query<Record<string, unknown>>(
@@ -2813,6 +2896,115 @@ app.openapi(deleteTaskRoute, async (c) => {
   return c.json({ ok: true }, 200);
 });
 
+// ── Deal updates ──
+//
+// What happened on a deal that the CRM can't read on its own: a phone call, a
+// WhatsApp or text message, an email from another inbox, a meeting moved or
+// held in person. Usually logged by an agent the user told about it. A call,
+// message, email or meeting is contact with the deal's company (deal-progress.ts);
+// a note is not.
+
+const DEAL_UPDATE_KINDS = ["call", "message", "email", "meeting", "note"] as const;
+
+const dealUpdateRoute = createRoute({
+  method: "post",
+  path: "/api/deals/{id}/updates",
+  tags: ["Deals"],
+  summary: "Log what happened on a deal, what it finished, and its next step",
+  description: "One call for an update the CRM can't read on its own (a phone call, a message, an email from another inbox, a meeting moved or held in person, or a note). It goes on the deal's timeline at the time it happened. done_task_ids marks open tasks the update finished. next_step adds what happens next as a task on the deal, with its date and who owes it. close_date moves the expected close. A call, message, email or meeting counts as contact with the deal's company; a note does not. Move the stage with PUT /api/deals/{id}.",
+  request: {
+    params: IdParam,
+    body: { required: true, content: { "application/json": { schema: z.object({
+      kind: z.enum(DEAL_UPDATE_KINDS).openapi({ description: "call, message, email, meeting: contact with them. note: anything else worth keeping." }),
+      summary: z.string().min(1).max(2000).openapi({ description: "What happened, in a sentence or two: who, and what was said or agreed" }),
+      at: z.string().optional().openapi({ description: "When it happened: ISO 8601, or YYYY-MM-DD. Default now. Never in the future: what will happen goes in next_step." }),
+      done_task_ids: z.array(z.string()).max(20).optional().openapi({ description: "Open tasks of this deal (GET /api/tasks?deal_id=) that the update finished" }),
+      next_step: z.object({
+        title: z.string().min(1).max(300),
+        due_date: z.string().openapi({ description: "YYYY-MM-DD" }),
+        owed_by: z.enum(["us", "them"]).optional().openapi({ description: "Default us" }),
+      }).optional().openapi({ description: "What happens next, by when, and who owes it: added as a task on the deal" }),
+      close_date: z.string().optional().openapi({ description: "YYYY-MM-DD, when the expected close moved" }),
+    }) } } },
+  },
+  responses: {
+    201: { description: "Logged; the deal with its progress, and the next-step task", content: { "application/json": { schema: z.object({ deal: DealSchema, task: TaskSchema.nullable() }) } } },
+    400: { description: "Validation error", content: { "application/json": { schema: ErrorSchema } } },
+    403: { description: "Not allowed", content: { "application/json": { schema: ErrorSchema } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+/** "YYYY-MM-DD HH:MM:SS" (UTC), as SQLite's datetime('now') stores it, so the timeline sorts as one. */
+function sqlTime(t: number): string {
+  return new Date(t).toISOString().replace("T", " ").slice(0, 19);
+}
+
+app.openapi(dealUpdateRoute, async (c) => {
+  if (!mayWrite(c)) return c.json({ error: "Sign in to log updates." }, 403);
+  const { id } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const deal = await get<{ id: string; company_id: string | null; contact_id: string | null; account: string | null }>(
+    `SELECT d.id, d.company_id, d.contact_id, COALESCE(d.company_id, ct.company_id) AS account
+       FROM deals d LEFT JOIN contacts ct ON ct.id = d.contact_id WHERE d.id = ?`,
+    [id],
+  );
+  if (!deal) return c.json({ error: "Deal not found" }, 404);
+  const summary = body.summary.trim();
+  if (!summary) return c.json({ error: "Say what happened in summary" }, 400);
+
+  const now = Date.now();
+  const future = "at is in the future: log what happened, and put what will happen in next_step";
+  let at = now;
+  if (body.at) {
+    let t: number;
+    if (isDay(body.at)) {
+      // A day alone is judged against the viewer's today: today is now, an earlier day is its noon (UTC).
+      const today = localDay(now, tzOffsetOf(c.req.query("tz")));
+      if (body.at > today) return c.json({ error: future }, 400);
+      t = body.at === today ? now : Date.parse(`${body.at}T12:00:00Z`);
+    } else {
+      t = Date.parse(body.at);
+      if (Number.isNaN(t)) return c.json({ error: "at must be ISO 8601 or YYYY-MM-DD" }, 400);
+      if (t > now + 5 * 60_000) return c.json({ error: future }, 400);
+    }
+    at = t;
+  }
+  if (body.next_step && !isDay(body.next_step.due_date)) return c.json({ error: "next_step.due_date must be a date as YYYY-MM-DD" }, 400);
+  if (body.close_date && !isDay(body.close_date)) return c.json({ error: "close_date must be a date as YYYY-MM-DD" }, 400);
+  const by = user(c)?.email ?? caller(c) ?? null;
+
+  await run(
+    "INSERT INTO activities (id, entity_type, entity_id, type, body, meta, created_at) VALUES (?, 'deal', ?, ?, ?, ?, ?)",
+    [crypto.randomUUID(), id, body.kind, summary, JSON.stringify({ logged_by: by }), sqlTime(at)],
+  );
+  // Only the deal's own open tasks, or its company's on no deal, can be closed from it.
+  const done = [...new Set(body.done_task_ids ?? [])];
+  if (done.length) {
+    await run(
+      `UPDATE tasks SET done_at = COALESCE(done_at, datetime('now')), updated_at = datetime('now')
+        WHERE id IN (${done.map(() => "?").join(", ")}) AND done_at IS NULL
+          AND (deal_id = ? OR (deal_id IS NULL AND company_id = ?))`,
+      [...done, id, deal.account],
+    );
+  }
+  let task: ReturnType<typeof taskView> | null = null;
+  if (body.next_step) {
+    const taskId = crypto.randomUUID();
+    await run(
+      "INSERT INTO tasks (id, title, company_id, contact_id, deal_id, owed_by, due_date, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [taskId, body.next_step.title.trim().slice(0, 300), deal.account, deal.contact_id, id, body.next_step.owed_by ?? "us", body.next_step.due_date, by],
+    );
+    task = taskView((await get<Record<string, unknown>>(`${TASK_SELECT} WHERE t.id = ?`, [taskId]))!);
+  }
+  if (body.close_date) await run("UPDATE deals SET close_date = ?, updated_at = datetime('now') WHERE id = ?", [body.close_date, id]);
+
+  const fresh = (await get<Record<string, unknown>>(DEAL_SELECT + " WHERE d.id = ?", [id]))!;
+  const { progress } = await progressOf([fresh as unknown as ProgressDeal], new Date(), tzOffsetOf(c.req.query("tz")));
+  const view = { ...(await withRelationsOne("deal", fresh) as Record<string, unknown>), progress: progress.get(id) ?? null };
+  return c.json({ deal: view as unknown as z.infer<typeof DealSchema>, task }, 201);
+});
+
 // ── Insights ──
 
 const InsightSchema = z.object({
@@ -2929,7 +3121,6 @@ app.openapi(insightDealRoute, async (c) => {
 
 // ── Customers ──
 
-const SyncStateSchema = z.enum(["seen", "off", "importing", "failing"]).openapi({ description: "seen: on and working; off; importing: the first import hasn't finished; failing: the latest run failed" });
 
 const CustomerSchema = z.object({
   id: z.string(),
@@ -3398,9 +3589,10 @@ app.get("/api/deals/:id", async (c) => {
     const id = c.req.param("id");
     if (!id) return c.json({ error: "Not found" }, 404);
     await backfillDealCompanies();
-    const deal = await get(DEAL_SELECT + " WHERE d.id = ?", [id]);
+    const deal = await get<Record<string, unknown>>(DEAL_SELECT + " WHERE d.id = ?", [id]);
     if (!deal) return c.json({ error: "Deal not found" }, 404);
-    return c.json({ deal: await withRelationsOne("deal", deal) }, 200);
+    const { progress } = await progressOf([deal as unknown as ProgressDeal], new Date(), tzOffsetOf(c.req.query("tz")));
+    return c.json({ deal: { ...(await withRelationsOne("deal", deal) as Record<string, unknown>), progress: progress.get(id) ?? null } }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
