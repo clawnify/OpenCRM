@@ -3346,9 +3346,14 @@ app.post("/api/ai-columns/run", async (c) => {
 //
 // Ceiling: chunks are not one atomic transaction (the adapter exposes no
 // batch()/transaction). Companies are created before contacts so a mid-import
-// failure can't orphan a contact's company_id; re-running is safe for companies
-// (deduped by name) but may duplicate contacts. Upgrade to a single transaction
-// if @clawnify/db ever exposes batch().
+// failure can't orphan a contact's company_id. Re-running is safe: companies
+// dedupe by name and contacts by email + first name (below), so a retried or
+// overlapping import fills in what is missing instead of adding rows. Upgrade
+// to a single transaction if @clawnify/db ever exposes batch().
+//
+// A contact is the same person when both the email and the first name match,
+// ignoring case. The email alone isn't enough: a shared inbox (info@…) can
+// belong to several people. A row without an email never matches anything.
 
 const CONTACT_STATUSES = ["lead", "active", "inactive", "churned"];
 const LOOKUP_CHUNK = 100; // one-param `name IN (…)` lookups
@@ -3363,6 +3368,14 @@ function companyNameFromDomain(domain: string): string {
   const label = domain.replace(/^www\./, "").split(".")[0] || domain;
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
+
+/** The identity an import matches a contact on; "" means it never matches. */
+function contactKey(email: string, firstName: string): string {
+  const e = email.trim().toLowerCase();
+  return e ? `${e}\n${firstName.trim().toLowerCase()}` : "";
+}
+
+const isBlank = (v: unknown) => v === null || v === undefined || v === "";
 
 app.post("/api/contacts/import", async (c) => {
   try {
@@ -3392,7 +3405,7 @@ app.post("/api/contacts/import", async (c) => {
     // Keep only rows with at least a first name; normalize fields. `inferDomain`
     // is the work-email domain to build a company from — set only when opted in,
     // the row has no explicit company, and the email domain isn't a free provider.
-    const clean = rows
+    const named = rows
       .map((r) => {
         const email = (r.email || "").trim();
         const company = (r.company || "").trim();
@@ -3412,8 +3425,29 @@ app.post("/api/contacts/import", async (c) => {
         };
       })
       .filter((r) => r.first_name);
-    const skipped = rows.length - clean.length;
-    if (clean.length === 0) return c.json({ error: "No rows had a first name to import" }, 400);
+    const skipped = rows.length - named.length;
+    if (named.length === 0) return c.json({ error: "No rows had a first name to import" }, 400);
+
+    // The same person twice in one file becomes one row: the first wins and the
+    // later ones only fill in what it left blank.
+    const clean: typeof named = [];
+    const firstByKey = new Map<string, (typeof named)[number]>();
+    for (const r of named) {
+      const key = contactKey(r.email, r.first_name);
+      const first = key ? firstByKey.get(key) : undefined;
+      if (!first) {
+        if (key) firstByKey.set(key, r);
+        clean.push(r);
+        continue;
+      }
+      for (const f of ["last_name", "phone", "title", "company", "company_domain", "company_industry", "company_phone", "inferDomain"] as const) {
+        if (!first[f]) first[f] = r[f];
+      }
+      for (const [k, v] of Object.entries(r.custom ?? {})) {
+        if (isBlank(first.custom?.[k])) first.custom = { ...first.custom, [k]: v };
+      }
+    }
+    const duplicates = named.length - clean.length;
 
     // ── Resolve company names → ids (set-based, case-insensitive) ──
     // Distinct names, keeping the first-seen original casing for any we create.
@@ -3494,33 +3528,83 @@ app.post("/api/contacts/import", async (c) => {
 
     const companiesCreated = missing.length + missingDomains.length;
 
-    // ── Bulk-insert contacts (multi-row VALUES, chunked) ──
+    const companyIdFor = (r: (typeof clean)[number]) =>
+      r.company
+        ? companyIds.get(r.company.toLowerCase()) ?? null
+        : r.inferDomain
+          ? companyIdByDomain.get(r.inferDomain) ?? null
+          : null;
+    const custom = await resolveImportCustomColumns("contact", clean);
+
+    // ── Match contacts the CRM already has ──
+    // When the CRM already holds the same person twice, the most recently
+    // updated one is used, the same choice /api/lookup makes.
+    const existingByKey = new Map<string, Record<string, unknown>>();
+    const emails = [...new Set(clean.map((r) => r.email.toLowerCase()).filter(Boolean))];
+    const customSelect = custom.keys.map((k) => `, ${quoteIdent(k)}`).join("");
+    for (const group of chunk(emails, LOOKUP_CHUNK)) {
+      const found = await query<Record<string, unknown>>(
+        `SELECT id, email, first_name, last_name, phone, title, company_id${customSelect}
+           FROM contacts WHERE lower(trim(email)) IN (${group.map(() => "?").join(", ")})
+          ORDER BY updated_at ASC`,
+        group,
+      );
+      for (const row of found) existingByKey.set(contactKey(String(row.email), String(row.first_name)), row);
+    }
+    const fresh = clean.filter((r) => !existingByKey.has(contactKey(r.email, r.first_name)));
+    const matched = clean.length - fresh.length;
+
+    // ── Fill in what matched contacts are missing (never overwrite) ──
+    // An import only adds to a contact the CRM already has: a field with a
+    // value keeps it, and status is never touched (a row without a status
+    // column would otherwise turn every active contact back into a lead).
+    // The COALESCE re-checks in SQL, so an edit made since the read above wins.
+    const fillCols = ["last_name", "phone", "title", "company_id", ...custom.keys];
+    const fills: unknown[][] = [];
+    for (const r of clean) {
+      const existing = existingByKey.get(contactKey(r.email, r.first_name));
+      if (!existing) continue;
+      const incoming: Record<string, unknown> = { last_name: r.last_name, phone: r.phone, title: r.title, company_id: companyIdFor(r) };
+      for (const k of custom.keys) incoming[k] = coerceForImport(r.custom?.[k], custom.defByKey.get(k)!);
+      if (fillCols.some((col) => isBlank(existing[col]) && !isBlank(incoming[col]))) {
+        fills.push([existing.id, ...fillCols.map((col) => incoming[col])]);
+      }
+    }
+    const fillRow = `(${["id", ...fillCols].map(() => "?").join(", ")})`;
+    // VALUES names its columns column1, column2, …; column1 is the id.
+    const fillSet = fillCols
+      .map((col, i) => `${quoteIdent(col)} = COALESCE(NULLIF(contacts.${quoteIdent(col)}, ''), v.column${i + 2})`)
+      .join(", ");
+    for (const group of chunk(fills, Math.max(1, Math.floor(100 / (fillCols.length + 1))))) {
+      await run(
+        `UPDATE contacts SET ${fillSet}, updated_at = datetime('now')
+           FROM (VALUES ${group.map(() => fillRow).join(", ")}) AS v
+          WHERE contacts.id = v.column1`,
+        group.flat(),
+      );
+    }
+
+    // ── Bulk-insert new contacts (multi-row VALUES, chunked) ──
     // Mapped custom-field columns ride along in the same INSERT. Chunk size is
     // derived from the real column count so bound params stay ≤ 100 (D1 cap).
-    const custom = await resolveImportCustomColumns("contact", clean);
     const builtinCols = ["id", "first_name", "last_name", "email", "phone", "company_id", "title", "status"];
     const cols = [...builtinCols, ...custom.keys.map(quoteIdent)];
     const rowsPerStmt = Math.max(1, Math.floor(100 / cols.length));
     const rowPlaceholder = `(${cols.map(() => "?").join(", ")})`;
 
     let imported = 0;
-    for (const group of chunk(clean, rowsPerStmt)) {
+    for (const group of chunk(fresh, rowsPerStmt)) {
       const placeholders = group.map(() => rowPlaceholder).join(", ");
       const params: unknown[] = [];
       for (const r of group) {
-        const companyId = r.company
-          ? companyIds.get(r.company.toLowerCase()) ?? null
-          : r.inferDomain
-            ? companyIdByDomain.get(r.inferDomain) ?? null
-            : null;
-        params.push(crypto.randomUUID(), r.first_name, r.last_name, r.email, r.phone, companyId, r.title, r.status);
+        params.push(crypto.randomUUID(), r.first_name, r.last_name, r.email, r.phone, companyIdFor(r), r.title, r.status);
         for (const k of custom.keys) params.push(coerceForImport(r.custom?.[k], custom.defByKey.get(k)!));
       }
       await run(`INSERT INTO contacts (${cols.join(", ")}) VALUES ${placeholders}`, params);
       imported += group.length;
     }
 
-    return c.json({ imported, companiesCreated, skipped }, 200);
+    return c.json({ imported, matched, companiesCreated, skipped, duplicates }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }

@@ -179,7 +179,11 @@ Users import via the dashboard UI (Contacts → **Import**): upload a CSV/XLSX, 
 columns to fields, import. Programmatically: `POST /api/contacts/import`
 `{ contacts: [{ first_name, last_name?, email?, phone?, title?, status?, company? }] }`.
 Company names are resolved to existing companies or created. Rows without a first
-name are skipped. Returns `{ imported, companiesCreated, skipped }`.
+name are skipped. A row whose email and first name match a contact already in the
+CRM (ignoring case) updates that contact instead of adding one, filling in only
+fields it has empty; status is never changed. Rows without an email always add a
+contact. Returns `{ imported, matched, companiesCreated, skipped, duplicates }`
+(`duplicates`: rows repeating an earlier row's email and first name, merged).
 
 ## AI columns
 
