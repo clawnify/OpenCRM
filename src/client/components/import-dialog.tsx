@@ -343,8 +343,14 @@ function doneDetail(r: ImportResult, noun: string): string {
   const parts: string[] = [];
   if (r.companiesCreated && r.companiesCreated > 0)
     parts.push(`${r.companiesCreated} new ${r.companiesCreated === 1 ? "company" : "companies"}`);
+  if (r.matched && r.matched > 0)
+    parts.push(`${r.matched} already in the CRM, empty fields filled in`);
   if (r.duplicates && r.duplicates > 0)
-    parts.push(`${r.duplicates} duplicate ${r.duplicates === 1 ? `${noun} name` : `${noun} names`} skipped`);
+    parts.push(
+      noun === "contact"
+        ? `${r.duplicates} repeated in the file, merged`
+        : `${r.duplicates} duplicate ${r.duplicates === 1 ? `${noun} name` : `${noun} names`} skipped`,
+    );
   if (r.skipped > 0) parts.push(`${r.skipped} ${r.skipped === 1 ? "row" : "rows"} skipped (no name)`);
   return parts.length ? parts.join(" · ") : "All rows imported cleanly.";
 }
