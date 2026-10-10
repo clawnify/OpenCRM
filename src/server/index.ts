@@ -36,6 +36,7 @@ import {
   HISTORY_DAYS, LIVE_INTERVAL_MS as MEETINGS_INTERVAL_MS, type MeetingSync,
 } from "./meetings.js";
 import { customersOverview } from "./customers.js";
+import { lookup } from "./lookup.js";
 import { dealsProgress, SEVERITY, type ProgressDeal } from "./deal-progress.js";
 import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, countSQL, countOf, type ManyLink } from "./relations.js";
 
@@ -3174,6 +3175,53 @@ app.openapi(customersRoute, async (c) => {
     await backfillCustomers();
     const tz = Number(c.req.valid("query").tz ?? 0);
     return c.json(await customersOverview(new Date(), Number.isFinite(tz) ? Math.max(-840, Math.min(840, tz)) : 0), 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+const lookupRoute = createRoute({
+  method: "get",
+  path: "/api/lookup",
+  tags: ["Customers"],
+  summary: "What the CRM knows about an email address before someone writes to it",
+  description: "The contact with exactly this address; their company (else the company on `domain`, else on the address's own domain when it is a work address), with customer_since when it is a customer; the company's and the contact's deals (open first, at most 10); the latest call with the company (a synced meeting, or a call or meeting logged by hand; emails are left out, since an app that sends logs its own sends here); and the next meeting booked. Nulls and an empty list when the CRM has never heard of them. Read only.",
+  request: {
+    query: z.object({
+      email: z.string().optional().openapi({ description: "The address, matched exactly (case aside)" }),
+      domain: z.string().optional().openapi({ description: "The company's domain, when the address is a personal one or the company is known by another domain" }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "What the CRM knows",
+      content: { "application/json": { schema: z.object({
+        contact: z.object({ id: z.string(), first_name: z.string(), last_name: z.string(), title: z.string(), status: z.string() }).nullable(),
+        company: z.object({ id: z.string(), name: z.string(), domain: z.string(), customer_since: z.string().nullable(), renewal_date: z.string().nullable() }).nullable(),
+        deals: z.array(z.object({
+          id: z.string(), name: z.string(), stage: z.string(), stage_label: z.string(),
+          state: z.enum(["open", "won", "lost"]).openapi({ description: "From the stage's flags; a stage not in the pipeline counts as open" }),
+          value: z.number(), close_date: z.string(),
+        })),
+        last_call_at: z.string().nullable(),
+        next_meeting: z.object({ title: z.string(), starts_at: z.string() }).nullable(),
+      }).openapi("Lookup") } },
+    },
+    400: { description: "Neither email nor domain given", content: { "application/json": { schema: ErrorSchema } } },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(lookupRoute, async (c) => {
+  try {
+    const q = c.req.valid("query");
+    const email = (q.email ?? "").trim();
+    const domain = (q.domain ?? "").trim();
+    if (!email && !domain) return c.json({ error: "Give an email, a domain, or both" }, 400);
+    await ensureStagesSeeded();
+    await backfillDealCompanies();
+    await backfillCustomers();
+    return c.json(await lookup(email, domain), 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }

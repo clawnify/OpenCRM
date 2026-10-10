@@ -126,6 +126,13 @@ Transcripts stay in Granola. Meetings with only the team are never listed.
   already set stays: if a deal was marked won by mistake, clear `customer_since`
   by hand. `{ renewal_date: "YYYY-MM-DD" }` sets the next renewal: within 30 days
   it shows as a reason and in `focus`, and once passed it asks for the next date.
+- `GET /api/lookup?email=&domain=`: what the CRM knows about an address before
+  anyone writes to it. The contact with exactly that address; their company (else
+  the one on `domain`, else on the address's own work domain), with
+  `customer_since` when it is a customer; its and the contact's `deals` (open
+  first, each with `state` open, won or lost); `last_call_at`; and the
+  `next_meeting` booked. Check it before a cold email: a customer, an open deal or
+  a booked call means a person should decide whether it goes out.
 
 To answer "how is <customer> doing" or "what did we promise <company>", read
 these, and quote the reasons and the call's words rather than paraphrasing them.
