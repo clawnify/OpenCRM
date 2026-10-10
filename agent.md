@@ -133,6 +133,8 @@ Transcripts stay in Granola. Meetings with only the team are never listed.
   first, each with `state` open, won or lost); `last_call_at`; and the
   `next_meeting` booked. Check it before a cold email: a customer, an open deal or
   a booked call means a person should decide whether it goes out.
+  `POST /api/lookup` `{ "addresses": [{ "email", "domain"? }] }` answers up to 100
+  at once, in order (`results`), to check a batch before they join a campaign.
 
 To answer "how is <customer> doing" or "what did we promise <company>", read
 these, and quote the reasons and the call's words rather than paraphrasing them.

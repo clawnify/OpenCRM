@@ -36,7 +36,7 @@ import {
   HISTORY_DAYS, LIVE_INTERVAL_MS as MEETINGS_INTERVAL_MS, type MeetingSync,
 } from "./meetings.js";
 import { customersOverview } from "./customers.js";
-import { lookup } from "./lookup.js";
+import { lookup, lookupMany } from "./lookup.js";
 import { dealsProgress, SEVERITY, type ProgressDeal } from "./deal-progress.js";
 import { withRelations, relationWriteError, relationSortSQL, detachRelations, searchRecords, manyLinks, countSQL, countOf, type ManyLink } from "./relations.js";
 
@@ -3180,6 +3180,18 @@ app.openapi(customersRoute, async (c) => {
   }
 });
 
+const LookupSchema = z.object({
+  contact: z.object({ id: z.string(), first_name: z.string(), last_name: z.string(), title: z.string(), status: z.string() }).nullable(),
+  company: z.object({ id: z.string(), name: z.string(), domain: z.string(), customer_since: z.string().nullable(), renewal_date: z.string().nullable() }).nullable(),
+  deals: z.array(z.object({
+    id: z.string(), name: z.string(), stage: z.string(), stage_label: z.string(),
+    state: z.enum(["open", "won", "lost"]).openapi({ description: "From the stage's flags; a stage not in the pipeline counts as open" }),
+    value: z.number(), close_date: z.string(),
+  })),
+  last_call_at: z.string().nullable(),
+  next_meeting: z.object({ title: z.string(), starts_at: z.string() }).nullable(),
+}).openapi("Lookup");
+
 const lookupRoute = createRoute({
   method: "get",
   path: "/api/lookup",
@@ -3195,17 +3207,7 @@ const lookupRoute = createRoute({
   responses: {
     200: {
       description: "What the CRM knows",
-      content: { "application/json": { schema: z.object({
-        contact: z.object({ id: z.string(), first_name: z.string(), last_name: z.string(), title: z.string(), status: z.string() }).nullable(),
-        company: z.object({ id: z.string(), name: z.string(), domain: z.string(), customer_since: z.string().nullable(), renewal_date: z.string().nullable() }).nullable(),
-        deals: z.array(z.object({
-          id: z.string(), name: z.string(), stage: z.string(), stage_label: z.string(),
-          state: z.enum(["open", "won", "lost"]).openapi({ description: "From the stage's flags; a stage not in the pipeline counts as open" }),
-          value: z.number(), close_date: z.string(),
-        })),
-        last_call_at: z.string().nullable(),
-        next_meeting: z.object({ title: z.string(), starts_at: z.string() }).nullable(),
-      }).openapi("Lookup") } },
+      content: { "application/json": { schema: LookupSchema } },
     },
     400: { description: "Neither email nor domain given", content: { "application/json": { schema: ErrorSchema } } },
     500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
@@ -3222,6 +3224,42 @@ app.openapi(lookupRoute, async (c) => {
     await backfillDealCompanies();
     await backfillCustomers();
     return c.json(await lookup(email, domain), 200);
+  } catch (err: unknown) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+const lookupManyRoute = createRoute({
+  method: "post",
+  path: "/api/lookup",
+  tags: ["Customers"],
+  summary: "What the CRM knows about up to 100 addresses at once",
+  description: "The answer GET /api/lookup gives, for each address in the order asked. For an app checking a batch of people before they join a campaign. An address with neither email nor domain gets an empty answer.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            addresses: z.array(z.object({ email: z.string().optional(), domain: z.string().optional() })).min(1).max(100),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "One answer per address, in order", content: { "application/json": { schema: z.object({ results: z.array(LookupSchema) }) } } },
+    400: { description: "No addresses, or more than 100", content: { "application/json": { schema: ErrorSchema } } },
+    500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(lookupManyRoute, async (c) => {
+  try {
+    const { addresses } = c.req.valid("json");
+    await ensureStagesSeeded();
+    await backfillDealCompanies();
+    await backfillCustomers();
+    return c.json({ results: await lookupMany(addresses.map((a) => ({ email: a.email ?? "", domain: a.domain ?? "" }))) }, 200);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);
   }
