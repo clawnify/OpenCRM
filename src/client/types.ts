@@ -238,12 +238,14 @@ export type ImportEntity = "contact" | "company";
 // validated server-side per entity, so this is intentionally loose.
 export type ImportRow = Record<string, unknown> & { custom?: Record<string, unknown> };
 
-// Import outcome — fields vary by entity (contacts report companiesCreated,
-// companies report duplicates skipped).
+// Import outcome — fields vary by entity (contacts report companiesCreated and
+// the contacts they matched; duplicates are repeats of a company name, or of a
+// contact's email and first name).
 export interface ImportResult {
   imported: number;
   skipped: number;
   companiesCreated?: number;
+  matched?: number;
   duplicates?: number;
 }
 
