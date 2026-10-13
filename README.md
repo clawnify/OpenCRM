@@ -39,7 +39,7 @@ Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with
 
 ```bash
 git clone https://github.com/clawnify/OpenCRM.git
-cd open-crm
+cd OpenCRM
 pnpm install
 pnpm run dev
 ```
