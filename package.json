@@ -7,7 +7,8 @@
     "db:migrate": "wrangler d1 execute open-crm-db --local --file=src/server/schema.sql",
     "dev": "pnpm db:migrate && concurrently -n ui,api -c cyan,green \"vite\" \"wrangler dev --port 8787\"",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:outreach": "node --test tests/contact-outreach.test.mjs"
   },
   "dependencies": {
     "@clawnify/app": "^0.4.1",

@@ -40,7 +40,20 @@ stays lenient and does not enforce required.
 Every contact/company/deal has a timeline. Integrations and notes write to it.
 
 - `GET /api/activities?entity_type=contact&entity_id=<id>` — newest first.
-- `POST /api/activities` `{ entity_type, entity_id, type, body }` — log a note.
+- `POST /api/activities` `{ entity_type, entity_id, type?, body, at? }` — log an
+  activity on an existing record (`type` defaults to `note`). `at` is when it
+  happened: ISO 8601 with a timezone, or `YYYY-MM-DD`; omitted means now. A day
+  alone uses noon UTC, or now for today (optional `?tz=` is the viewer's UTC
+  offset in minutes). Future dates are rejected; timestamps allow five minutes
+  of clock skew, as deal updates do. Invalid input returns 400, a missing record
+  404, and a failed write 500.
+- To record email sent outside the CRM, use
+  `{ "entity_type": "contact", "entity_id": "<id>", "type": "email",
+     "body": "Sent the follow-up proposal", "at": "2026-07-16T14:30:00Z" }`.
+  This records what already happened; it does not send an email. The timeline
+  uses that event time, and `last_contacted_at` becomes the newest of logged
+  contact emails and synced emails. Logging an older touch does not move it
+  backward. Notes and scheduled-meeting activities do not update it.
 
 ## Integrations (Clawnify connections)
 
@@ -81,8 +94,10 @@ a contact, the CRM keeps who wrote to whom and when. Email bodies stay in Gmail.
 - `GET /api/emails/{mailbox}/{id}`: one email's text, read live from Gmail, with
   `subject`, `from`, `to` and `cc` (for Reply all). Only when the mailbox shares
   everything (`can_open: true` on the email); 403 otherwise.
-- Contacts carry `last_contacted_at` (read-only), so "who haven't we emailed in a
+- Contacts carry `last_contacted_at` (read-only, newest synced or logged email), so "who haven't we emailed in a
   month" is a filter on the contacts list: `last_contacted_at` `before` a date.
+  Sync recomputes it from both sources. Removing synced mail preserves separately
+  logged outreach; it becomes null only when neither source has an email.
 - `GET /api/email-sync` shows the settings and progress; `POST /api/email-sync/sync-now`
   syncs now.
 
