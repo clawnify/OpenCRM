@@ -45,6 +45,7 @@ export const contactImportConfig: EntityImportConfig = {
     phone: "phone", phonenumber: "phone", mobile: "phone", mobilephone: "phone", cell: "phone", telephone: "phone", tel: "phone",
     title: "title", jobtitle: "title", role: "title", position: "title",
     company: "company", companyname: "company", organization: "company", organisation: "company", account: "company", employer: "company",
+    companyphone: "company_phone", companyphonenumber: "company_phone", companytelephone: "company_phone",
     companydomain: "company_domain", domain: "company_domain", website: "company_domain", companywebsite: "company_domain",
     industry: "company_industry", companyindustry: "company_industry", sector: "company_industry", vertical: "company_industry",
     status: "status", stage: "status", lifecyclestage: "status",
@@ -95,3 +96,53 @@ export const companyImportConfig: EntityImportConfig = {
   hasRequired: (m) => m.some((f) => f === "name"),
   requiredHint: "Map a column to Name to continue.",
 };
+
+export const CUSTOM_PREFIX = "custom:";
+
+const norm = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export function autoMap(
+  headers: string[],
+  config: EntityImportConfig,
+  customFields: { key: string; label: string }[],
+): string[] {
+  const result: string[] = headers.map(() => "");
+  const used = new Set<string>();
+  // 1. exact built-in header match
+  headers.forEach((h, i) => {
+    const f = config.exact[norm(h)];
+    if (f && !used.has(f)) {
+      result[i] = f;
+      used.add(f);
+    }
+  });
+  // A recognized built-in header keeps its meaning even if another column
+  // already claimed that target: leave the duplicate unmapped for review.
+  // 2. custom field whose key or label matches the header
+  headers.forEach((h, i) => {
+    if (result[i] || config.exact[norm(h)]) return;
+    const n = norm(h);
+    for (const d of customFields) {
+      const target = CUSTOM_PREFIX + d.key;
+      if (used.has(target)) continue;
+      if (n === norm(d.key) || n === norm(d.label)) {
+        result[i] = target;
+        used.add(target);
+        break;
+      }
+    }
+  });
+  // 3. fuzzy built-in fallback
+  headers.forEach((h, i) => {
+    if (result[i] || config.exact[norm(h)]) return;
+    const n = norm(h);
+    for (const [re, f] of config.fuzzy) {
+      if (re.test(n) && !used.has(f)) {
+        result[i] = f;
+        used.add(f);
+        break;
+      }
+    }
+  });
+  return result;
+}
