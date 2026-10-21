@@ -47,6 +47,9 @@ Every contact/company/deal has a timeline. Integrations and notes write to it.
 These use the org's Clawnify connections — no keys live in this app. Check what's
 wired first: `GET /api/integrations/status` → `{ email, meeting, slack, notes, mailbox }` (`notes`:
 Granola; `mailbox`: the address email goes out from, once email sync is set up).
+If discovery fails, this endpoint returns HTTP 503 with `{ error }`. The status
+is unknown: retry the check before suggesting reconnection. A successful response
+with false flags means those services are not connected.
 
 - **Send an email** — `POST /api/integrations/email`
   `{ to: [addresses], cc?, bcc?, subject, body }`, or `{ contact_id, subject, body }`

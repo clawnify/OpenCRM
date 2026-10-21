@@ -211,10 +211,10 @@ export function ContactDetail({ id, navigate, panel = false }: { id: string; nav
           </div>
 
           <div className="flex flex-wrap gap-2 px-4 pt-3 pb-4">
-            <Button variant="outline" size="sm" onClick={composeToContact} disabled={!connections.email} title={connections.email ? undefined : "Connect Gmail in Clawnify"}>
+            <Button variant="outline" size="sm" onClick={composeToContact} disabled={!connections.email} title={connections.error || (connections.email ? undefined : "Connect Gmail in Clawnify")}>
               <Mail className="size-4" /> Compose email
             </Button>
-            <Button variant="outline" size="sm" onClick={() => openFormKind("meeting")} disabled={!connections.meeting} title={connections.meeting ? undefined : "Connect Google Calendar in Clawnify"} aria-label="Schedule meeting">
+            <Button variant="outline" size="sm" onClick={() => openFormKind("meeting")} disabled={!connections.meeting} title={connections.error || (connections.meeting ? undefined : "Connect Google Calendar in Clawnify")} aria-label="Schedule meeting">
               <Calendar className="size-4" /> Meeting
             </Button>
             <Button variant="outline" size="icon" onClick={() => openFormKind("note")} aria-label="Add note" title="Add note">
