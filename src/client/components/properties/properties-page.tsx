@@ -14,7 +14,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
-  WIDGETS,
+  TYPE_OPTIONS,
   BASE_TYPES,
   widgetMetaFor,
   createCustomField,
@@ -43,12 +43,6 @@ function relationSummary(def: CustomFieldDef): string {
   const n = NOUN[def.target_entity];
   return def.relation_type === "many_to_one" ? `One ${n.one}` : `Many ${n.many}`;
 }
-
-// Combined type picker: bare base types + custom widgets, each with a stable id.
-const TYPE_OPTIONS = [
-  ...BASE_TYPES.map((b) => ({ id: `base:${b.field_type}`, ...b })),
-  ...WIDGETS.map((w) => ({ id: `widget:${w.uid}`, ...w })),
-];
 
 // ── Built-in (system) attributes per entity ───────────────────────────
 // Static by design: a template's built-ins are fixed — they mirror schema.sql
