@@ -970,7 +970,7 @@ const listContacts = createRoute({
   summary: "List contacts with pagination, search, and filtering",
   request: {
     query: PaginationQuery.extend({
-      status: z.string().optional().openapi({ description: "Filter by status (lead, customer, etc.)" }),
+      status: z.string().optional().openapi({ description: "Filter by status (lead, customer, etc.), matched without regard to case" }),
       company_id: z.string().optional().openapi({ description: "Filter by company ID" }),
     }),
   },
@@ -1004,7 +1004,7 @@ function contactsWhere(q: { search?: string; status?: string; company_id?: strin
     params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
   if (status) {
-    where.push("ct.status = ?");
+    where.push("LOWER(ct.status) = LOWER(?)");
     params.push(status);
   }
   if (companyId) {
@@ -1732,6 +1732,7 @@ const listDeals = createRoute({
         totalValue: z.number(),
       }) } },
     },
+    400: { description: "Invalid filters", content: { "application/json": { schema: ErrorSchema } } },
     500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
   },
 });
@@ -1757,8 +1758,10 @@ app.openapi(listDeals, async (c) => {
     const params: unknown[] = [];
 
     if (search) {
-      where.push("(d.name LIKE ? OR d.notes LIKE ?)");
-      params.push(`%${search}%`, `%${search}%`);
+      // A deal shows its company and contact, so a search finds it by those
+      // names too.
+      where.push("(d.name LIKE ? OR d.notes LIKE ? OR co.name LIKE ? OR ct.first_name LIKE ? OR ct.last_name LIKE ?)");
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (stage) {
       where.push("d.stage = ?");
@@ -1772,17 +1775,22 @@ app.openapi(listDeals, async (c) => {
       where.push("d.company_id = ?");
       params.push(companyId);
     }
+    const flt = buildFilters(await tableColumns("deals"), q.filters, "d.", tzOffsetOf(q.tz), await manyLinks("deal"));
+    where.push(...flt.clauses);
+    params.push(...flt.params);
 
     const whereSQL = where.length ? " WHERE " + where.join(" AND ") : "";
 
+    // Counted over the rows' own joins, since search and filters can reach the
+    // contact and company.
     const countResult = await get<{ total: number }>(
-      "SELECT COUNT(*) as total FROM deals d" + whereSQL,
+      `SELECT COUNT(*) as total FROM (${DEAL_SELECT}${whereSQL})`,
       [...params],
     );
     const total = countResult?.total || 0;
 
     const agg = await get<{ total_value: number }>(
-      "SELECT COALESCE(SUM(d.value), 0) as total_value FROM deals d" + whereSQL,
+      `SELECT COALESCE(SUM(value), 0) as total_value FROM (${DEAL_SELECT}${whereSQL})`,
       [...params],
     );
 
@@ -1796,7 +1804,7 @@ app.openapi(listDeals, async (c) => {
 
     return c.json({ deals: await withRelations("deal", rows as Record<string, unknown>[]), total, page, limit, totalValue: agg?.total_value || 0 }, 200);
   } catch (err: unknown) {
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: (err as Error).message }, err instanceof FilterError ? 400 : 500);
   }
 });
 
