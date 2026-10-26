@@ -279,7 +279,7 @@ export function EmailSyncPage() {
           <DialogHeader>
             <DialogTitle>Turn off email sync?</DialogTitle>
             <DialogDescription>
-              This deletes the {status.counts.emails} synced emails from the CRM and clears "last contacted". Contacts the sync added stay.
+              This deletes the {status.counts.emails} synced emails from the CRM. "Last contacted" keeps any separately logged emails. Contacts the sync added stay.
               Gmail itself is not touched.
             </DialogDescription>
           </DialogHeader>

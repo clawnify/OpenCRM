@@ -17,7 +17,7 @@ Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with
 ## Features
 
 - **Three entities** — contacts, companies, and deals with foreign-key relationships (UUID keys, not enumerable ids)
-- **Activity timeline** — every contact/company/deal has a feed; emails, meetings, notes, and deal-won events all log to it
+- **Activity timeline** — every contact/company/deal has a feed; emails, meetings, notes, and deal-won events all log to it. Log outreach sent elsewhere with `POST /api/activities` (`entity_type: "contact"`, `entity_id`, `type: "email"`, `body`, optional `at` timestamp or date). The event appears at that time and updates the contact's last-contacted date alongside synced mail
 - **Integrations (Clawnify connections)** — email a contact via Gmail, schedule a Google Calendar meeting, and post to Slack when a deal is won — all through the org's Clawnify connections, no keys in the app. A Google Workspace connection stands in for Gmail or Calendar when either isn't connected on its own
 - **AI columns**: hover a column (Industry, Title, your own attributes) and click the spark to have AI fill its empty cells from the rest of each record, with your instructions. Quote the company's domain in them and it reads that website too. It fills 20 rows at a time, so a wrong prompt costs little, and it never overwrites what someone typed. Calls go through Clawnify and are charged to the workspace's credits
 - **Gmail sync** (Settings → Email): see when you last emailed each contact and their emails on their page. You choose what it imports (all mail or some labels, and how far back), what the team sees (metadata, subjects, or everything), and whether people you email become contacts. Group and personal addresses and a blocklist are skipped. Bodies stay in Gmail: the CRM stores who wrote to whom and when, the subject only if you share it, and turning sync off deletes what it stored
@@ -228,6 +228,10 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 ## Community & Contributions
 
 This project is part of the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem. Contributions are welcome — open an issue or submit a PR.
+
+Run `pnpm test:outreach` with Node.js 22.13+ for contact outreach regression tests.
+They exercise the real API handlers with an isolated in-memory SQLite database
+and a fake email provider; no connected accounts or local CRM records are used.
 
 ## License
 

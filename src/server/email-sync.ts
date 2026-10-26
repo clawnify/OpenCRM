@@ -14,6 +14,7 @@
 
 import type { ConnectionsEnv } from "@clawnify/connections";
 import { get, query, run } from "./db.js";
+import { recomputeLastContacted } from "./activities.js";
 import { mailConnection, type GoogleConnection } from "./integrations.js";
 import { workEmailDomain, findOrCreateCompanyByDomain, FREEMAIL_DOMAINS } from "./email-domains.js";
 import { bookableAt } from "./jobs.js";
@@ -245,19 +246,6 @@ async function createContact(person: Address): Promise<string> {
   const id = crypto.randomUUID();
   await run("INSERT INTO contacts (id, first_name, last_name, email, company_id) VALUES (?, ?, ?, ?, ?)", [id, first, last, person.email, companyId]);
   return id;
-}
-
-async function recomputeLastContacted(contactIds: Iterable<string>): Promise<void> {
-  const ids = [...new Set(contactIds)];
-  for (let i = 0; i < ids.length; i += 90) {
-    const part = ids.slice(i, i + 90);
-    await run(
-      `UPDATE contacts SET last_contacted_at =
-         (SELECT MAX(l.sent_at) FROM email_message_contacts l WHERE l.contact_id = contacts.id)
-       WHERE id IN (${part.map(() => "?").join(", ")})`,
-      part,
-    );
-  }
 }
 
 // ── Storing ────────────────────────────────────────────────────────
