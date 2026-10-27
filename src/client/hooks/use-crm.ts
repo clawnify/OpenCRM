@@ -84,8 +84,11 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
   const fetchConnections = useCallback(async () => {
     try {
       setConnections(await api<ConnectionStatus>("GET", "/api/integrations/status"));
-    } catch {
-      /* off-platform / no broker — leave everything disconnected */
+    } catch (err) {
+      setConnections({
+        email: false, meeting: false, slack: false, notes: false,
+        error: err instanceof Error ? err.message : "Could not check connections. Try again.",
+      });
     }
   }, []);
 
@@ -288,7 +291,7 @@ export function useCrmState(isAgent: boolean): CrmContextValue {
     addCompany, updateCompany, deleteCompanies,
     deals, dealsPag, dealsTotalValue, setDealsPage: dSet.setPage, setDealsSort: dSet.setSort, setDealsSearch: dSet.setSearch,
     addDeal, fetchDeal, updateDeal, deleteDeal, boardDeals, boardFilters, setBoardFilters,
-    connections, scheduleMeeting,
+    connections, refetchConnections: fetchConnections, scheduleMeeting,
     fetchActivities, addNote, importEntity,
     customFields, refetchCustomFields,
     changes, recordsChanged,

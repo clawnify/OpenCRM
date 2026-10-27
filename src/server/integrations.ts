@@ -10,7 +10,7 @@
 // Keeping the (service, action) pairs here means a Composio rename is a one-line
 // edit, not a hunt across the codebase.
 
-import { connect, describe, type ConnectionsEnv, type GenericClient } from "@clawnify/connections";
+import { connect, type ConnectionsEnv, type GenericClient } from "@clawnify/connections";
 
 // Canonical service ids (never invent these — they come from the Clawnify
 // connections catalog). Mail goes through Gmail and meetings through Google
@@ -46,8 +46,50 @@ export interface GoogleConnection {
 
 /** The services the org has connected, in one call to the broker. */
 async function connectedServices(env: ConnectionsEnv): Promise<Set<string>> {
-  const all = await describe(env, undefined, Object.values(SERVICES).map((service) => ({ service, as: "integration" as const })));
-  return new Set(all.filter((s) => s.connected).map((s) => s.id));
+  // connections 0.5.1's describe() swallows RPC failures, and its HTTP binding
+  // turns non-2xx responses into []. Use the same discovery contract directly
+  // here so an outage cannot masquerade as a successful "nothing connected".
+  let services: unknown;
+  if (env.CREDENTIALS) {
+    if (!env.CLAWNIFY_ORG_ID) throw new Error("Cannot check connections: CLAWNIFY_ORG_ID is missing.");
+    try {
+      services = await env.CREDENTIALS.listConnected(env.CLAWNIFY_ORG_ID);
+    } catch {
+      throw new Error("Could not check connections with Clawnify. Try again.");
+    }
+  } else if (env.CLAWNIFY_TOKEN) {
+    // Match the SDK's HTTP fallback, including service tokens without an org.
+    const base = (env.CLAWNIFY_API_URL ?? "https://provision.clawnify.com").replace(/\/+$/, "");
+    let response: Response;
+    try {
+      response = await fetch(`${base}/v1/connections/connected`, {
+        headers: {
+          Authorization: `Bearer ${env.CLAWNIFY_TOKEN}`,
+          "Content-Type": "application/json",
+          ...(env.CLAWNIFY_ORG_ID ? { "x-org-id": env.CLAWNIFY_ORG_ID } : {}),
+        },
+      });
+    } catch {
+      throw new Error("Could not check connections with Clawnify. Try again.");
+    }
+    if (!response.ok) {
+      throw new Error(`Could not check connections with Clawnify (HTTP ${response.status}). Try again.`);
+    }
+    try {
+      services = ((await response.json()) as { services?: unknown } | null)?.services;
+    } catch {
+      throw new Error("Invalid connection status response from Clawnify. Try again.");
+    }
+  } else if (env.CLAWNIFY_ORG_ID) {
+    throw new Error("Cannot check connections: CREDENTIALS or CLAWNIFY_TOKEN is missing.");
+  } else {
+    // Local development with no broker or token is intentionally disconnected.
+    return new Set();
+  }
+  if (!Array.isArray(services) || !services.every((service) => typeof service === "string")) {
+    throw new Error("Invalid connection status response from Clawnify. Try again.");
+  }
+  return new Set(services);
 }
 
 /** The service that does `own`'s job: itself when connected, else Google Workspace. */
