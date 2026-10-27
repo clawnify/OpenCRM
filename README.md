@@ -78,6 +78,8 @@ The human UI stays unchanged — hover-to-reveal actions, compact spacing, and a
 - Node.js 20+
 - pnpm (or npm/yarn)
 
+Run the import-mapping regression tests with `pnpm test:import` (Node.js 22.6+).
+
 ## Architecture
 
 ```
