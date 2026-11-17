@@ -32,7 +32,7 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
   canCompose: boolean;
   navigate: (to: string) => void;
 }) {
-  const { changes } = useCrm();
+  const { changes, connections } = useCrm();
   const [data, setData] = useState<{ emails: ContactEmail[]; total: number; sync_on: boolean } | null>(null);
   const [all, setAll] = useState(false);
   const [viewing, setViewing] = useState<ContactEmail | null>(null);
@@ -58,7 +58,7 @@ export function ContactEmails({ contactId, contactName, onCompose, canCompose, n
         <h2 className="inline-flex items-center gap-2 text-sm font-medium">
           Emails <span className="rounded-xs bg-secondary px-1.5 text-xs tabular text-muted-foreground">{data?.total ?? 0}</span>
         </h2>
-        <Button variant="ghost" size="icon" aria-label="Compose email" title={canCompose ? "Compose email" : "Connect Gmail in Clawnify"} disabled={!canCompose} onClick={onCompose}>
+        <Button variant="ghost" size="icon" aria-label="Compose email" title={connections.error ?? (canCompose ? "Compose email" : "Connect Gmail in Clawnify")} disabled={!canCompose} onClick={onCompose}>
           <Plus className="size-4" />
         </Button>
       </div>

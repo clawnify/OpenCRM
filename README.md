@@ -229,6 +229,12 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 
 This project is part of the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem. Contributions are welcome — open an issue or submit a PR.
 
+### Integration status checks
+
+Run `pnpm test:integrations` with Node.js 22.6+ to test connection discovery,
+Google Workspace fallback, and broker failures. Tests use synthetic credentials
+and a local HTTP server; no connected accounts are needed.
+
 ## License
 
 MIT

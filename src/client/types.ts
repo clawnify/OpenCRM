@@ -211,6 +211,8 @@ export interface ConnectionStatus {
   notes: boolean;
   /** The address email goes out from, once email sync is set up. */
   mailbox?: string | null;
+  /** Discovery failed: the booleans disable actions, not a confirmed disconnect. */
+  error?: string;
 }
 
 export interface EmailAddress {

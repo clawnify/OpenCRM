@@ -50,6 +50,7 @@ export interface CrmContextValue {
 
   // Integrations (Clawnify connections)
   connections: ConnectionStatus;
+  refetchConnections: () => Promise<void>;
   scheduleMeeting: (contactId: string, data: { summary: string; start_datetime: string; timezone: string; duration_minutes: number }) => Promise<void>;
 
   // Activity timeline

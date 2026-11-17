@@ -2083,8 +2083,8 @@ app.get("/api/integrations/status", async (c) => {
   const mailbox = (await currentAccount().catch(() => null))?.mailbox ?? null;
   try {
     return c.json({ ...(await connectionStatus(c.env)), mailbox }, 200);
-  } catch {
-    return c.json({ email: false, meeting: false, slack: false, notes: false, mailbox }, 200);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Could not check connections with Clawnify. Try again." }, 503);
   }
 });
 
