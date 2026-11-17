@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@clawnify/app':
-        specifier: ^0.4.1
-        version: 0.4.1(@cloudflare/workers-types@4.20260702.1)(@hono/zod-openapi@0.18.4(hono@4.12.2)(zod@3.25.76))(@phosphor-icons/react@2.1.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(hono@4.12.2)(react@19.2.7)
+        specifier: ^0.4.8
+        version: 0.4.8(@cloudflare/workers-types@4.20260702.1)(@hono/zod-openapi@0.18.4(hono@4.12.2)(zod@3.25.76))(@phosphor-icons/react@2.1.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(hono@4.12.2)(react@19.2.7)
       '@clawnify/connections':
         specifier: ^0.5.1
         version: 0.5.1
       '@clawnify/db':
-        specifier: ^0.4.2
-        version: 0.4.2(@cloudflare/workers-types@4.20260702.1)
+        specifier: ^0.4.3
+        version: 0.4.3(@cloudflare/workers-types@4.20260702.1)
       '@clawnify/queue':
         specifier: ^0.1.1
         version: 0.1.1
@@ -116,7 +116,7 @@ importers:
         version: 19.2.3(@types/react@19.2.17)
       '@vitejs/plugin-react':
         specifier: ^4.3.0
-        version: 4.7.0(vite@6.4.1(@types/node@25.3.0)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2))
+        version: 4.7.0(supports-color@10.2.2)(vite@6.4.1(@types/node@25.3.0)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2))
       concurrently:
         specifier: ^9.0.0
         version: 9.2.1
@@ -226,8 +226,8 @@ packages:
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
 
-  '@clawnify/app@0.4.1':
-    resolution: {integrity: sha512-Qfe3ELtW9WeENc+cKWAyvxP+/w4JWbD5Oxb8W6jGe0Osg0FKvKRHfPn/z/PRyPPFua1Xs5CKoqkRHjLE1NETKg==}
+  '@clawnify/app@0.4.8':
+    resolution: {integrity: sha512-kDeP5J67x6BkTcdFPKgmr3bHuTKyhny2XXkrnyhlHXb4+nVNSYDgNWyeam/Pwkx6wnryvZ3nkv/VAlCDL0bZiA==}
     peerDependencies:
       '@hono/zod-openapi': '>=0.18 <1'
       '@phosphor-icons/react': '>=2'
@@ -242,8 +242,8 @@ packages:
   '@clawnify/connections@0.5.1':
     resolution: {integrity: sha512-qQwZIjpkMUmhzNpqMhQyHI8ttcpEHIYLoI4h66fNrxoyDIgINz8v9Cau53EHcBOuCr/huWp8XXBuuhnJsVXvRQ==}
 
-  '@clawnify/db@0.4.2':
-    resolution: {integrity: sha512-s+G/5bDVFx7Na8WVETfl8EhyPcbmgs5LIE1TsM0vGUOAtPihQGlVX1xpfmg5lsMv8+OChKaHsZIMnzpXY8pyAw==}
+  '@clawnify/db@0.4.3':
+    resolution: {integrity: sha512-7CqhOilLT3xjyKwO1+B4hfo/Cy2jpkLfpmgXaiQUpKLmvyPYtqOf+3w+QQyGo0QWy5QzjN60HCX0COjk055ldg==}
 
   '@clawnify/integrations@0.4.0':
     resolution: {integrity: sha512-epX7r9VHczmjHJuegsn1ogRM9SG8CsYLsyF6hfxN3uV4nDYjdWazNingZnAgOI+ynVj0ZLV8x2rUnNoUUnSuQw==}
@@ -2433,20 +2433,20 @@ snapshots:
 
   '@babel/compat-data@7.29.0': {}
 
-  '@babel/core@7.29.0':
+  '@babel/core@7.29.0(supports-color@10.2.2)':
     dependencies:
       '@babel/code-frame': 7.29.0
       '@babel/generator': 7.29.1
       '@babel/helper-compilation-targets': 7.28.6
-      '@babel/helper-module-transforms': 7.28.6(@babel/core@7.29.0)
+      '@babel/helper-module-transforms': 7.28.6(@babel/core@7.29.0(supports-color@10.2.2))(supports-color@10.2.2)
       '@babel/helpers': 7.28.6
       '@babel/parser': 7.29.0
       '@babel/template': 7.28.6
-      '@babel/traverse': 7.29.0
+      '@babel/traverse': 7.29.0(supports-color@10.2.2)
       '@babel/types': 7.29.0
       '@jridgewell/remapping': 2.3.5
       convert-source-map: 2.0.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@10.2.2)
       gensync: 1.0.0-beta.2
       json5: 2.2.3
       semver: 6.3.1
@@ -2471,19 +2471,19 @@ snapshots:
 
   '@babel/helper-globals@7.28.0': {}
 
-  '@babel/helper-module-imports@7.28.6':
+  '@babel/helper-module-imports@7.28.6(supports-color@10.2.2)':
     dependencies:
-      '@babel/traverse': 7.29.0
+      '@babel/traverse': 7.29.0(supports-color@10.2.2)
       '@babel/types': 7.29.0
     transitivePeerDependencies:
       - supports-color
 
-  '@babel/helper-module-transforms@7.28.6(@babel/core@7.29.0)':
+  '@babel/helper-module-transforms@7.28.6(@babel/core@7.29.0(supports-color@10.2.2))(supports-color@10.2.2)':
     dependencies:
-      '@babel/core': 7.29.0
-      '@babel/helper-module-imports': 7.28.6
+      '@babel/core': 7.29.0(supports-color@10.2.2)
+      '@babel/helper-module-imports': 7.28.6(supports-color@10.2.2)
       '@babel/helper-validator-identifier': 7.28.5
-      '@babel/traverse': 7.29.0
+      '@babel/traverse': 7.29.0(supports-color@10.2.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -2504,14 +2504,14 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.0
 
-  '@babel/plugin-transform-react-jsx-self@7.29.7(@babel/core@7.29.0)':
+  '@babel/plugin-transform-react-jsx-self@7.29.7(@babel/core@7.29.0(supports-color@10.2.2))':
     dependencies:
-      '@babel/core': 7.29.0
+      '@babel/core': 7.29.0(supports-color@10.2.2)
       '@babel/helper-plugin-utils': 7.29.7
 
-  '@babel/plugin-transform-react-jsx-source@7.29.7(@babel/core@7.29.0)':
+  '@babel/plugin-transform-react-jsx-source@7.29.7(@babel/core@7.29.0(supports-color@10.2.2))':
     dependencies:
-      '@babel/core': 7.29.0
+      '@babel/core': 7.29.0(supports-color@10.2.2)
       '@babel/helper-plugin-utils': 7.29.7
 
   '@babel/template@7.28.6':
@@ -2520,7 +2520,7 @@ snapshots:
       '@babel/parser': 7.29.0
       '@babel/types': 7.29.0
 
-  '@babel/traverse@7.29.0':
+  '@babel/traverse@7.29.0(supports-color@10.2.2)':
     dependencies:
       '@babel/code-frame': 7.29.0
       '@babel/generator': 7.29.1
@@ -2528,7 +2528,7 @@ snapshots:
       '@babel/parser': 7.29.0
       '@babel/template': 7.28.6
       '@babel/types': 7.29.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@10.2.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -2537,9 +2537,9 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
 
-  '@clawnify/app@0.4.1(@cloudflare/workers-types@4.20260702.1)(@hono/zod-openapi@0.18.4(hono@4.12.2)(zod@3.25.76))(@phosphor-icons/react@2.1.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(hono@4.12.2)(react@19.2.7)':
+  '@clawnify/app@0.4.8(@cloudflare/workers-types@4.20260702.1)(@hono/zod-openapi@0.18.4(hono@4.12.2)(zod@3.25.76))(@phosphor-icons/react@2.1.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(hono@4.12.2)(react@19.2.7)':
     dependencies:
-      '@clawnify/db': 0.4.2(@cloudflare/workers-types@4.20260702.1)
+      '@clawnify/db': 0.4.3(@cloudflare/workers-types@4.20260702.1)
       '@clawnify/routes': 0.3.0(@hono/zod-openapi@0.18.4(hono@4.12.2)(zod@3.25.76))(hono@4.12.2)
       '@hono/zod-openapi': 0.18.4(hono@4.12.2)(zod@3.25.76)
       hono: 4.12.2
@@ -2581,7 +2581,7 @@ snapshots:
     dependencies:
       '@clawnify/integrations': 0.4.0
 
-  '@clawnify/db@0.4.2(@cloudflare/workers-types@4.20260702.1)':
+  '@clawnify/db@0.4.3(@cloudflare/workers-types@4.20260702.1)':
     dependencies:
       drizzle-orm: 0.45.2(@cloudflare/workers-types@4.20260702.1)
     transitivePeerDependencies:
@@ -3729,11 +3729,11 @@ snapshots:
     dependencies:
       csstype: 3.2.3
 
-  '@vitejs/plugin-react@4.7.0(vite@6.4.1(@types/node@25.3.0)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2))':
+  '@vitejs/plugin-react@4.7.0(supports-color@10.2.2)(vite@6.4.1(@types/node@25.3.0)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
-      '@babel/core': 7.29.0
-      '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.0)
-      '@babel/plugin-transform-react-jsx-source': 7.29.7(@babel/core@7.29.0)
+      '@babel/core': 7.29.0(supports-color@10.2.2)
+      '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.0(supports-color@10.2.2))
+      '@babel/plugin-transform-react-jsx-source': 7.29.7(@babel/core@7.29.0(supports-color@10.2.2))
       '@rolldown/pluginutils': 1.0.0-beta.27
       '@types/babel__core': 7.20.5
       react-refresh: 0.17.0
@@ -3835,9 +3835,11 @@ snapshots:
 
   csstype@3.2.3: {}
 
-  debug@4.4.3:
+  debug@4.4.3(supports-color@10.2.2):
     dependencies:
       ms: 2.1.3
+    optionalDependencies:
+      supports-color: 10.2.2
 
   detect-libc@2.1.2: {}
 
