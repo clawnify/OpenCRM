@@ -19,7 +19,7 @@ import {
   SelectLabel,
   SelectSeparator,
 } from "@/components/ui/select";
-import type { EntityImportConfig } from "@/lib/import-config";
+import { autoMap, CUSTOM_PREFIX, type EntityImportConfig } from "@/lib/import-config";
 import type { ImportResult, ImportRow } from "@/types";
 
 type Step = "upload" | "map" | "done";
@@ -30,56 +30,8 @@ interface Parsed {
 }
 
 // Radix Select items cannot use an empty-string value, so "Skip" uses this
-// sentinel and is treated as "" everywhere in the mapping logic. Custom-field
-// targets are prefixed so they're distinguishable from built-in payload keys.
+// sentinel and is treated as "" everywhere in the mapping logic.
 const SKIP = "__skip__";
-const CUSTOM_PREFIX = "custom:";
-
-const norm = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-function autoMap(
-  headers: string[],
-  config: EntityImportConfig,
-  customFields: { key: string; label: string }[],
-): string[] {
-  const result: string[] = headers.map(() => "");
-  const used = new Set<string>();
-  // 1. exact built-in header match
-  headers.forEach((h, i) => {
-    const f = config.exact[norm(h)];
-    if (f && !used.has(f)) {
-      result[i] = f;
-      used.add(f);
-    }
-  });
-  // 2. custom field whose key or label matches the header
-  headers.forEach((h, i) => {
-    if (result[i]) return;
-    const n = norm(h);
-    for (const d of customFields) {
-      const target = CUSTOM_PREFIX + d.key;
-      if (used.has(target)) continue;
-      if (n === norm(d.key) || n === norm(d.label)) {
-        result[i] = target;
-        used.add(target);
-        break;
-      }
-    }
-  });
-  // 3. fuzzy built-in fallback
-  headers.forEach((h, i) => {
-    if (result[i]) return;
-    const n = norm(h);
-    for (const [re, f] of config.fuzzy) {
-      if (re.test(n) && !used.has(f)) {
-        result[i] = f;
-        used.add(f);
-        break;
-      }
-    }
-  });
-  return result;
-}
 
 export function ImportDialog({
   open,
