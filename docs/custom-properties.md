@@ -128,13 +128,31 @@ dedicated **Properties** screen reachable from the sidebar — HubSpot's *Settin
 
 ## 7. Import inference (the payoff)
 
-`/api/contacts/import` already exists. Extend it so unmapped spreadsheet columns
-auto-create defs with an inferred type — `https://` → URL, `@` → email, 0–100 int
-→ score, ≤12 distinct values → badge, `;`-delimited → tags — running the same
-`custom_field_defs` + schema-sync path as the manual Properties screen. This is
-what turns a 40+-column spreadsheet drop into a native-looking CRM instead of
-dropped columns, and it's the single biggest reason custom properties earn their
-keep here. (Custom-property inference is still pending — tracked in issue #3.)
+The Contacts and Companies import dialogs suggest **Create new field** for
+unmapped, named columns with meaningful values. The review lets the user edit
+the label and type, map to an existing field, or skip the column. Empty, unnamed,
+and placeholder-only columns default to Skip. Reading a file or cancelling the
+review never creates fields.
+
+Suggestions run locally: URLs, emails, international phone numbers, ISO dates,
+semicolon-delimited tags, scores (integers 0–100), numbers, and badges (at most
+12 short distinct values); other content stays text. Identifier-like headers
+and leading-zero numbers stay text. CSV values are read without automatic date
+or number conversion. Excel cells retain their formatted display text.
+The type choices come from the same catalog as Attributes, excluding relations.
+Badge options include every non-empty value in the column, not only the preview.
+
+**Create N fields & import** explicitly confirms the new fields. Type overrides
+are checked before writes, then the existing `/api/custom-fields` endpoint
+creates the approved definitions and schema columns before the normal import
+request. Tags become arrays and checkbox strings become booleans. Keys use a
+`custom_` prefix and numeric suffixes to avoid system fields and existing keys.
+
+Field creation is sequential, not an atomic import transaction. If a later
+creation fails, no records are imported; successful fields remain visible and
+are reused when the user retries within the review. They also remain in
+Attributes if the user cancels. No existing fields or values are changed to make
+an inferred definition fit. AI-assisted mapping remains a separate follow-up.
 
 ### 7a. Company columns on import (shipped)
 
@@ -186,8 +204,8 @@ the mapped values ride along in the same bulk `INSERT` as real columns — chunk
 size is derived from the live column count so bound params stay ≤ 100 (D1's cap).
 Coercion is **lenient for import**: a bad cell (invalid enum, unparseable number)
 becomes `null` rather than aborting the batch, unlike the create/update path which
-rejects. This is *mapping to fields you already created* — distinct from inferring
-brand-new defs from unmapped columns (§7, issue #3), still the last open slice.
+rejects. This is *mapping to fields you already created*; §7 describes the review
+that creates new definitions for unmapped columns before using this same path.
 
 **Company import** dedupes by name (case-insensitive): a name that already exists,
 or repeats within the file, is skipped and reported (`duplicates`), never

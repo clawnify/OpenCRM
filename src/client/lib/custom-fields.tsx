@@ -48,6 +48,11 @@ export const BASE_TYPES: WidgetMeta[] = [
   { uid: "", label: "Relation", icon: ArrowLeftRight, field_type: "relation" },
 ];
 
+export const TYPE_OPTIONS = [
+  ...BASE_TYPES.map((b) => ({ id: `base:${b.field_type}`, ...b })),
+  ...WIDGETS.map((w) => ({ id: `widget:${w.uid}`, ...w })),
+];
+
 export function widgetMetaFor(def: Pick<CustomFieldDef, "custom_field" | "field_type">): WidgetMeta | undefined {
   return def.custom_field ? WIDGETS.find((w) => w.uid === def.custom_field) : undefined;
 }

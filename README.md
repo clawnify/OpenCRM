@@ -22,7 +22,7 @@ Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with
 - **AI columns**: hover a column (Industry, Title, your own attributes) and click the spark to have AI fill its empty cells from the rest of each record, with your instructions. Quote the company's domain in them and it reads that website too. It fills 20 rows at a time, so a wrong prompt costs little, and it never overwrites what someone typed. Calls go through Clawnify and are charged to the workspace's credits
 - **Gmail sync** (Settings → Email): see when you last emailed each contact and their emails on their page. You choose what it imports (all mail or some labels, and how far back), what the team sees (metadata, subjects, or everything), and whether people you email become contacts. Group and personal addresses and a blocklist are skipped. Bodies stay in Gmail: the CRM stores who wrote to whom and when, the subject only if you share it, and turning sync off deletes what it stored
 - **Meetings and customers** (Settings → Meetings): reads the workspace's Google Calendar and Granola call notes. Every meeting with people from outside lands on its company, linked by who was invited; the rest wait in a short list to link by hand. Each call with a Granola note is read once by AI for a summary, how it went, the tasks promised (ours and theirs, with due dates when one was said) and insights: ideas to propose, room to expand, risks. The Customers page shows every customer worst first with the reasons in plain words (an overdue promise, a call that went badly, no contact in weeks, a renewal coming up), the few things to do first, and this week's calls with notes from the last one. It only calls an account quiet through what it can see: with calls or email not synced, or a contact whose email history isn't read yet, the reason says so, and an account it can't see at all shows "Can't tell" rather than "On track". Transcripts stay in Granola
-- **CSV / XLSX import** — upload a spreadsheet, map columns to fields (exact-match auto-mapping), preview, import; company names resolve to existing companies or are created
+- **CSV / XLSX import** — upload a spreadsheet, map columns to fields (exact-match auto-mapping), review suggested new custom fields with editable labels and types, then import; empty columns default to Skip and new fields are only created on confirmation. Company names resolve to existing companies or are created
 - **Deal pipeline** — a board tracking deals through stages (prospect → qualified → proposal → negotiation → won/lost) with per-column totals
 - **Next steps** (Deals → Next steps): every open deal shows its next step, the next call booked with its company or its soonest task with a date (ours or theirs), and the open deals are listed worst first with the reasons in plain words: our promise overdue, no next step, no contact in 14 days, waiting on them, the close date passed. The deal page shows its next step, its tasks, and the calls with its company. What the CRM can't read on its own (a phone call, a WhatsApp message, a meeting moved) is logged with `POST /api/deals/{id}/updates`, usually by an agent you told about it, and counts as contact
 - **Path routing** — deep-linkable views and records: a row opens in a side panel beside the list (`/contacts?record=:id`), and expands to its full page (`/contacts/:id`)
@@ -45,6 +45,15 @@ pnpm run dev
 ```
 
 Open `http://localhost:5175` in your browser. Data persists in `data.db`.
+
+### Import inference tests
+
+With Node.js 22.6+ installed, run `pnpm test:import-fields` for the dependency-free
+inference and import-plan tests. See [the import design](docs/custom-properties.md#7-import-inference-the-payoff)
+for the review flow and partial-failure behavior.
+To try the review locally, import `tests/fixtures/import-fields.csv` from Contacts.
+It contains fictional contacts, a badge, tags, ISO dates, leading-zero postal
+codes, and an empty column that should stay skipped.
 
 ### Agent Mode (for OpenClaw / Browser-Use)
 
