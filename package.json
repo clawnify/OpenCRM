@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clawnify/app": "^0.4.8",
+    "@clawnify/app": "^0.4.11",
     "@clawnify/connections": "^0.5.1",
     "@clawnify/db": "^0.4.3",
     "@clawnify/queue": "^0.1.1",
