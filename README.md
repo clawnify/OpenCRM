@@ -4,13 +4,15 @@
 
 [![Deploy with Clawnify](https://app.clawnify.com/deploy-button.svg)](https://app.clawnify.com/deploy?repo=clawnify/OpenCRM)
 
-A lightweight CRM with contacts, companies, and deals — built for SaaS dashboards and AI agents. Part of the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem. Zero cloud dependencies — runs locally with SQLite.
+A lightweight CRM with contacts, companies, and deals — built for SaaS dashboards and AI agents. Zero cloud dependencies — runs locally with SQLite.
+
+The app is open source. Deploy it to Clawnify to use it from ChatGPT, Claude, or other MCP-compatible AI chats through the Clawnify connector.
 
 Built with **React + Tailwind + shadcn/ui** on **Hono + Cloudflare D1**. Path-based routing, UUID keys, a dark mode that follows the OS, and a dual-mode UI: one for humans and one for AI agents (larger targets, always-visible actions).
 
 ## What Is It?
 
-OpenCRM is a production-ready contact relationship manager designed for the OpenClaw community. Think of it as an open-source HubSpot alternative — a CRM you can self-host, customize, and embed in any SaaS product.
+OpenCRM is a production-ready contact relationship manager. Think of it as an open-source HubSpot alternative — a CRM you can self-host, customize, and embed in any SaaS product.
 
 Unlike HubSpot or Salesforce, this runs entirely on your own infrastructure with no API keys, no vendor lock-in, and no per-seat pricing. It provides a complete sales pipeline and lead management system. Manage contacts, companies, and deals with rich column types, inline editing, and full CRUD — all out of the box.
 
@@ -46,7 +48,7 @@ pnpm run dev
 
 Open `http://localhost:5175` in your browser. Data persists in `data.db`.
 
-### Agent Mode (for OpenClaw / Browser-Use)
+### Agent Mode (for browser automation)
 
 Append `?agent=true` to the URL:
 
@@ -227,7 +229,7 @@ List endpoints take `filters`: a JSON list, ANDed, of rules `{field, op, value}`
 
 ## Community & Contributions
 
-This project is part of the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem. Contributions are welcome — open an issue or submit a PR.
+Contributions are welcome — open an issue or submit a PR.
 
 ## License
 
