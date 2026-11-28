@@ -1,6 +1,7 @@
 import { createApp, createRoute, widgets, z, caller, user } from "@clawnify/app";
 import { verifyDelivery } from "@clawnify/queue";
 import { query, get, run } from "./db.js";
+import { appendActivity } from "./activities.js";
 import type { CredentialBinding } from "@clawnify/connections";
 import { sendEmail, replyToThread, forwardMessage, createMeeting, notifySlack, connectionStatus, mailConnection } from "./integrations.js";
 import {
@@ -89,10 +90,7 @@ async function logActivity(
   meta: Record<string, unknown> = {},
 ): Promise<void> {
   try {
-    await run(
-      "INSERT INTO activities (id, entity_type, entity_id, type, body, meta) VALUES (?, ?, ?, ?, ?, ?)",
-      [crypto.randomUUID(), entity_type, entity_id, type, body, JSON.stringify(meta)],
-    );
+    await appendActivity(entity_type, entity_id, type, body, meta);
   } catch {
     /* timeline logging must never break the primary action */
   }
@@ -241,7 +239,7 @@ const ContactSchema = z.object({
   company_id: z.string().nullable(),
   title: z.string(),
   status: z.string(),
-  last_contacted_at: z.string().nullable().optional().openapi({ description: "Newest synced email with this contact (Gmail sync). Read-only" }),
+  last_contacted_at: z.string().nullable().optional().openapi({ description: "Newest synced or logged email with this contact. Read-only" }),
   company_name: z.string().nullable().optional(),
   company_domain: z.string().nullable().optional(),
   created_at: z.string(),
@@ -2061,15 +2059,37 @@ app.get("/api/activities", async (c) => {
 
 app.post("/api/activities", async (c) => {
   try {
-    const body = await c.req.json<{ entity_type?: string; entity_id?: string; type?: string; body?: string }>();
-    const entity_type = (body.entity_type || "").trim();
-    const entity_id = (body.entity_id || "").trim();
+    const parsed = z.object({
+      entity_type: z.string().trim(),
+      entity_id: z.string().trim().min(1),
+      type: z.string().trim().min(1).default("note"),
+      body: z.string().trim().min(1, "Note body is required"),
+      at: z.string().trim().min(1).optional(),
+    }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error.issues[0].message }, 400);
+    const { entity_type, entity_id, type, body: text, at: suppliedAt } = parsed.data;
     if (!ENTITY_TYPES.includes(entity_type) || !entity_id) {
       return c.json({ error: "entity_type and entity_id are required" }, 400);
     }
-    const text = (body.body || "").trim();
-    if (!text) return c.json({ error: "Note body is required" }, 400);
-    await logActivity(entity_type, entity_id, (body.type || "note").trim(), text);
+    const now = Date.now();
+    let at = now;
+    if (suppliedAt !== undefined) {
+      if (isDay(suppliedAt)) {
+        // As with deal updates: today means now; an earlier day means noon UTC.
+        const today = localDay(now, tzOffsetOf(c.req.query("tz")));
+        if (suppliedAt > today) return c.json({ error: "at must not be in the future" }, 400);
+        at = suppliedAt === today ? now : Date.parse(`${suppliedAt}T12:00:00Z`);
+      } else {
+        if (!z.string().datetime({ offset: true }).safeParse(suppliedAt).success) {
+          return c.json({ error: "at must be an ISO 8601 timestamp with timezone or YYYY-MM-DD" }, 400);
+        }
+        at = Date.parse(suppliedAt);
+        if (at > now + 5 * 60_000) return c.json({ error: "at must not be in the future" }, 400);
+      }
+    }
+    const entity = await get(`SELECT id FROM ${ENTITY_TABLES[entity_type as EntityType]} WHERE id = ?`, [entity_id]);
+    if (!entity) return c.json({ error: "Record not found" }, 404);
+    await appendActivity(entity_type, entity_id, type, text, {}, sqlTime(at));
     return c.json({ ok: true }, 201);
   } catch (err: unknown) {
     return c.json({ error: (err as Error).message }, 500);

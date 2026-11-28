@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS contacts (
   company_id TEXT REFERENCES companies(id) ON DELETE SET NULL,
   title TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'lead',
-  -- The newest synced email with this contact (email_message_contacts). Kept by
-  -- the Gmail sync, read-only through the API; NULL when nothing is synced.
+  -- The newest synced or logged email with this contact. Kept by Gmail sync
+  -- and contact email activity writes; read-only through the API.
   last_contacted_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))

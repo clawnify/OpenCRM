@@ -77,7 +77,7 @@ export interface Contact {
   company_id: string | null;
   title: string;
   status: string;
-  /** Newest synced email with this contact (Gmail sync); read-only. */
+  /** Newest synced or logged email with this contact; read-only. */
   last_contacted_at?: string | null;
   company_name?: string | null;
   company_domain?: string | null;
